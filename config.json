@@ -1,0 +1,45 @@
+{
+    "models":[
+        {
+            "name":"cindy_",
+            "type":"model"
+        },
+        {
+            "name":"ecup-juli",
+            "type":"model"
+        },
+        {
+            "name":"love-juan520-",
+            "type":"model"
+        },
+        {
+            "name":"selina530",
+            "type":"model"
+        },
+        {
+            "name":"kpkpr",
+            "type":"model"
+        },
+        {
+            "name":"hannabeckett",
+            "type":"model"
+        },{
+            "name":"KarlyPrint",
+            "type":"model"
+        },{
+            "name":"_ouou_",
+            "type":"model"
+        },{
+            "name":"PixieLand",
+            "type":"model"
+        },{
+            "name":"Rileysim88",
+            "type":"model"
+        },{
+            "name":"-o_mei-",
+            "type":"model"
+        }
+    ],
+    "save_dir":"./"
+
+}
