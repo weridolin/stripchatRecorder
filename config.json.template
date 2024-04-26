@@ -1,0 +1,20 @@
+{
+    "models":[
+        {
+            "name":"modelName",
+            "type":"model"
+        }
+    ],
+    "save_dir":"/dir/to/save",
+    "notify":{
+        "enable":true,
+        "type":"email",
+        "email":{
+            "smtp":"email.server.com",
+            "port":465,
+            "user":"",
+            "password":""
+        }
+    }
+
+}
