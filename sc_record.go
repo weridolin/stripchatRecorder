@@ -224,6 +224,7 @@ func (t *Task) StartDownload() {
 		return
 	}
 
+	// current live file save path
 	t.CurrentSaveFilePath = filepath.Join(t.SaveDir, fileName)
 	_, err := os.Stat(t.CurrentSaveFilePath)
 	if err != nil && os.IsNotExist(err) {
@@ -237,7 +238,7 @@ func (t *Task) StartDownload() {
 	defer file.Close()
 
 	// download init file first
-	log.Printf("(%s) is Online ... start task", t.ModelName)
+	log.Printf("(%s) is Online . start task,begin downloading init file", t.ModelName)
 	// fileName := strings.Split(t.ExtXMap, "/")[len(strings.Split(t.ExtXMap, "/"))-1]
 	resp, err := http.Get(t.ExtXMap)
 	if err != nil {
@@ -246,7 +247,6 @@ func (t *Task) StartDownload() {
 	} else {
 		data, _ := ioutil.ReadAll(resp.Body)
 		file.Write(data)
-
 		for {
 			if len(t.PartToDownload) == 0 {
 				time.Sleep(5 * time.Second)
@@ -263,7 +263,6 @@ func (t *Task) StartDownload() {
 		}
 	}
 
-	// download init file first
 }
 
 func (t *Task) Run() {

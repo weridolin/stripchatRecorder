@@ -71,7 +71,7 @@ class TaskMixin:
                             # print(f"ext_x_map -> {self.ext_x_map}")
                     self.current_segment_sequence = m3u8_obj.media_sequence
                 else:
-                    print(f"No new segment sequence -> {m3u8_obj.media_sequence},{self.current_segment_sequence}")
+                    print(f"No new segment,  sequence ->  {m3u8_obj.media_sequence}, current sequence -> {self.current_segment_sequence}")
         return m3u8_obj
 
     
@@ -141,9 +141,11 @@ class Task(TaskMixin):
                     await asyncio.sleep(20)
             except FlagNotSameError:
                 logger.error("ext_x_map is not the same, begin restart after 5s ...")
+                self.current_segment_sequence=0
                 await asyncio.sleep(5)
             except:
                 logger.exception("Error while starting task,begin restart after 5s ...", exc_info=True)
+                self.current_segment_sequence=0
                 await asyncio.sleep(5)
 
 
