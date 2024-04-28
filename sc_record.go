@@ -239,13 +239,18 @@ func (t *Task) DownloadPartFile(PartUrl string, ExtXMap string) bool {
 
 func (t *Task) StartDownload(ctx context.Context) {
 	defer func() {
-		fmt.Printf("(%s) task downloader stop feed path -> %s \n", t.ModelName, t.CurrentSaveFilePath)
+		log.Printf("(%s) task downloader stop feed path -> %s \n", t.ModelName, t.CurrentSaveFilePath)
 		t.PartDownFinished = []string{}
 		t.PartToDownload = []string{}
 		t.CurrentSegmentSequence = 0
+		t.IsDownloaderStart = false
 	}()
-	if t.HasStart && t.IsDownloaderStart {
+	if t.IsDownloaderStart {
+		log.Printf("(%s) task downloader is already start", t.ModelName)
 		return
+	} else {
+		log.Printf("(%s) task downloader start", t.ModelName)
+		t.IsDownloaderStart = true
 	}
 RESTART:
 	// create save dir if not exist
@@ -342,7 +347,6 @@ func (t *Task) Run() {
 			t.GetPlayList()
 			if !t.IsDownloaderStart {
 				go t.StartDownload(ctx)
-				t.IsDownloaderStart = true
 			}
 		}
 	}
@@ -464,7 +468,7 @@ func main() {
 		for _, model := range config.Models {
 			task := NewTask(config, model.Name, taskMap, notifyMessageChan)
 			if ok, _ := task.IsOnline(); !ok {
-				log.Printf("Model %s is offline", model.Name)
+				// log.Printf("Model %s is offline", model.Name)
 				continue
 			} else {
 				if _, ok := taskMap[model.Name]; ok {
