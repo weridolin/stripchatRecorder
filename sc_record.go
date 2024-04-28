@@ -93,8 +93,8 @@ type Task struct {
 	TaskMap                map[string]*Task
 	CurrentSaveFilePath    string // current save file path
 	NotifyMessageChan      chan<- NotifyMessage
-	NewLiveStreamEvent     chan bool
-	IsDownloaderStart      bool
+	// NewLiveStreamEvent     chan bool
+	IsDownloaderStart bool
 }
 
 func NewTask(config Config, modelName string, taskMap map[string]*Task, notifyMessageChan chan<- NotifyMessage) *Task {
@@ -112,8 +112,8 @@ func NewTask(config Config, modelName string, taskMap map[string]*Task, notifyMe
 		TaskMap:                taskMap,
 		CurrentSaveFilePath:    "",
 		NotifyMessageChan:      notifyMessageChan,
-		NewLiveStreamEvent:     make(chan bool),
-		IsDownloaderStart:      false,
+		// NewLiveStreamEvent: make(chan bool),
+		IsDownloaderStart: false,
 	}
 }
 
