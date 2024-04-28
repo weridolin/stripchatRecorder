@@ -117,11 +117,25 @@ func NewTask(config Config, modelName string, taskMap map[string]*Task, notifyMe
 	}
 }
 
+func (t *Task) init() {
+	t.HasStart = false
+	t.CurrentSegmentSequence = 0
+	t.StreamName = ""
+	t.OnlineM3u8File = ""
+	t.ExtXMap = ""
+	t.PartToDownload = []string{}
+	t.PartDownFinished = []string{}
+	t.CurrentSaveFilePath = ""
+	t.IsDownloaderStart = false
+	t.SaveDir = ""
+}
+
 func (t *Task) IsOnline() (bool, string) {
 	if t.ModelName == "" {
 		log.Println("ModelName is empty")
 		return false, ""
 	}
+
 	CamInfoUri := fmt.Sprintf("https://stripchat.com/api/front/v2/models/username/%s/cam", t.ModelName)
 	resp, err := http.Get(CamInfoUri)
 	if err != nil {
@@ -157,21 +171,23 @@ func (t *Task) IsOnline() (bool, string) {
 	}
 }
 
-func (t *Task) GetPlayList() {
+func (t *Task) GetPlayList() error {
 
 	if t.OnlineM3u8File == "" {
 		log.Println("OnlineM3u8File is empty")
-		return
+		return fmt.Errorf("OnlineM3u8File is empty")
 	}
 	resp, err := http.Get(t.OnlineM3u8File)
 	if err != nil || resp.StatusCode != 200 {
+		// if stream is over,get 404
 		log.Println("Get m3u8 file failed, error:", err)
-		return
+		return fmt.Errorf(fmt.Sprintf("Get m3u8 file failed, error: %s", err))
 	}
 	body, err := ioutil.ReadAll(resp.Body)
 	if err != nil {
 		log.Println("Read m3u8 file failed, error:", err)
-		return
+
+		return fmt.Errorf(fmt.Sprintf("Read m3u8 file failed, error: %s", err))
 	}
 	resp.Body.Close()
 	// log.Printf("body %s:", string(body))
@@ -180,12 +196,12 @@ func (t *Task) GetPlayList() {
 	if err != nil {
 		// panic(err)
 		log.Panicf("(%s) Decode m3u8 file failed, error: %s", t.ModelName, err)
-		return
+		return fmt.Errorf(fmt.Sprintf("Decode m3u8 file failed, error: %s", err))
 	}
 	mediaPlaylist, ok := playlist.(*m3u8.MediaPlaylist)
 	if !ok {
 		log.Printf("(%s) MediaPlaylist is empty", t.ModelName)
-		return
+		return fmt.Errorf("MediaPlaylist is empty")
 	}
 
 	// check CurrentSegmentSequence is larger CurrentSegmentSequence
@@ -198,9 +214,9 @@ func (t *Task) GetPlayList() {
 					t.ExtXMap = segment.Map.URI
 				} else if segment.Map != nil && t.ExtXMap != segment.Map.URI {
 					log.Printf("ExtXMap is not equal, %s, %s stop current live stream downloading and start new one", t.ExtXMap, segment.Map.URI)
-					t.CurrentSegmentSequence = 0
-					t.NewLiveStreamEvent <- true
-					return
+					// t.CurrentSegmentSequence = 0
+					// t.NewLiveStreamEvent <- true
+					return fmt.Errorf("ExtXMap is not equal")
 				}
 				// part file is not exist in PartToDownload and PartDownFinished,add to PartToDownload
 				if !Contains(t.PartToDownload, segment.URI) && !Contains(t.PartDownFinished, segment.URI) {
@@ -212,7 +228,7 @@ func (t *Task) GetPlayList() {
 		}
 		t.CurrentSegmentSequence = int(mediaPlaylist.SeqNo)
 	}
-
+	return nil
 }
 
 func (t *Task) DownloadPartFile(PartUrl string, ExtXMap string) bool {
@@ -240,9 +256,9 @@ func (t *Task) DownloadPartFile(PartUrl string, ExtXMap string) bool {
 func (t *Task) StartDownload(ctx context.Context) {
 	defer func() {
 		log.Printf("(%s) task downloader stop feed path -> %s \n", t.ModelName, t.CurrentSaveFilePath)
-		t.PartDownFinished = []string{}
-		t.PartToDownload = []string{}
-		t.CurrentSegmentSequence = 0
+		// t.PartDownFinished = []string{}
+		// t.PartToDownload = []string{}
+		// t.CurrentSegmentSequence = 0
 		t.IsDownloaderStart = false
 	}()
 	if t.IsDownloaderStart {
@@ -252,7 +268,7 @@ func (t *Task) StartDownload(ctx context.Context) {
 		log.Printf("(%s) task downloader start", t.ModelName)
 		t.IsDownloaderStart = true
 	}
-RESTART:
+	// RESTART:
 	// create save dir if not exist
 	if t.Config.SaveDir == "" {
 		log.Printf("(%s) SaveDir is empty", t.ModelName)
@@ -282,7 +298,6 @@ RESTART:
 
 	// download init file first
 	log.Printf("(%s) is Online . start task,begin downloading init file", t.ModelName)
-	// fileName := strings.Split(t.ExtXMap, "/")[len(strings.Split(t.ExtXMap, "/"))-1]
 	resp, err := http.Get(t.ExtXMap)
 	if err != nil {
 		log.Printf("(%s) Download init file failed, error: %s. uri %s", t.ModelName, err, t.ExtXMap)
@@ -301,22 +316,21 @@ RESTART:
 					Type:      "down_finish",
 				}
 				return
-			case <-t.NewLiveStreamEvent:
-				t.PartDownFinished = []string{}
-				t.PartToDownload = []string{}
-				t.CurrentSegmentSequence = 0
-				t.NotifyMessageChan <- NotifyMessage{
-					ModelName: t.ModelName,
-					Message:   "model live stream down finish",
-					SavePath:  t.CurrentSaveFilePath,
-					Type:      "down_finish",
-				}
-				goto RESTART
+			// case <-t.NewLiveStreamEvent:
+			// 	t.PartDownFinished = []string{}
+			// 	t.PartToDownload = []string{}
+			// 	t.CurrentSegmentSequence = 0
+			// 	t.NotifyMessageChan <- NotifyMessage{
+			// 		ModelName: t.ModelName,
+			// 		Message:   "model live stream down finish",
+			// 		SavePath:  t.CurrentSaveFilePath,
+			// 		Type:      "down_finish",
+			// 	}
+			// 	goto RESTART
 			default:
 				if len(t.PartToDownload) == 0 {
 					time.Sleep(2 * time.Second)
 				} else {
-
 					partUri := t.PartToDownload[0]
 					// fmt.Println("partUri:", partUri)
 					t.DownloadPartFile(partUri, t.ExtXMap)
@@ -335,21 +349,22 @@ func (t *Task) Run() {
 	}()
 	ctx, cancel := context.WithCancel(context.Background())
 	t.HasStart = true
+
 	for {
-		if ok, _ := t.IsOnline(); !ok {
-			log.Printf("(%s) Model is offline stop task...", t.ModelName)
-			t.HasStart = false
-			t.TaskMap[t.ModelName] = nil
+		err := t.GetPlayList()
+		if err != nil {
+			// if error ，restart task
+			log.Printf("(%s) GetPlayList failed, error: %s", t.ModelName, err)
 			cancel()
+			t.init()
+			t.TaskMap[t.ModelName] = nil
 			return
-		} else {
-			// update current live stream play uri list
-			t.GetPlayList()
-			if !t.IsDownloaderStart {
-				go t.StartDownload(ctx)
-			}
+		}
+		if !t.IsDownloaderStart {
+			go t.StartDownload(ctx)
 		}
 	}
+	// }
 
 }
 
@@ -438,6 +453,21 @@ func LoadConfig(configFile string) Config {
 
 func main() {
 	config := LoadConfig("config.json")
+	// os.Setenv("HTTP_PROXY", config.Proxy.Uri)
+	// os.Setenv("HTTPS_PROXY", config.Proxy.Uri)
+	// CamInfoUri := "https://stripchat.com/api/front/v2/models/username/selina530/cam"
+	// resp, err := http.Get(CamInfoUri)
+	// if err != nil {
+	// 	// log.Println("()Get cam info failed, error:", err)
+	// 	log.Printf(" Get cam info failed, error: %s", err)
+	// 	return
+
+	// } else {
+	// 	fmt.Println("resp:", resp, resp.StatusCode)
+	// 	defer resp.Body.Close()
+	// }
+	// return
+
 	notifyCtx, notifyCancel := context.WithCancel(context.Background())
 	taskMap := make(map[string]*Task)
 	notifyMessageChan := make(chan NotifyMessage)
@@ -468,7 +498,10 @@ func main() {
 		for _, model := range config.Models {
 			task := NewTask(config, model.Name, taskMap, notifyMessageChan)
 			if ok, _ := task.IsOnline(); !ok {
-				// log.Printf("Model %s is offline", model.Name)
+				log.Printf("Model %s is offline", model.Name)
+				if _, ok := taskMap[model.Name]; ok {
+					taskMap[model.Name] = nil
+				}
 				continue
 			} else {
 				if _, ok := taskMap[model.Name]; ok {
