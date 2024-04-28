@@ -94,6 +94,7 @@ type Task struct {
 	CurrentSaveFilePath    string // current save file path
 	NotifyMessageChan      chan<- NotifyMessage
 	NewLiveStreamEvent     chan bool
+	IsDownloaderStart      bool
 }
 
 func NewTask(config Config, modelName string, taskMap map[string]*Task, notifyMessageChan chan<- NotifyMessage) *Task {
@@ -112,6 +113,7 @@ func NewTask(config Config, modelName string, taskMap map[string]*Task, notifyMe
 		CurrentSaveFilePath:    "",
 		NotifyMessageChan:      notifyMessageChan,
 		NewLiveStreamEvent:     make(chan bool),
+		IsDownloaderStart:      false,
 	}
 }
 
@@ -156,6 +158,7 @@ func (t *Task) IsOnline() (bool, string) {
 }
 
 func (t *Task) GetPlayList() {
+
 	if t.OnlineM3u8File == "" {
 		log.Println("OnlineM3u8File is empty")
 		return
@@ -165,12 +168,12 @@ func (t *Task) GetPlayList() {
 		log.Println("Get m3u8 file failed, error:", err)
 		return
 	}
-	defer resp.Body.Close()
 	body, err := ioutil.ReadAll(resp.Body)
 	if err != nil {
 		log.Println("Read m3u8 file failed, error:", err)
 		return
 	}
+	resp.Body.Close()
 	// log.Printf("body %s:", string(body))
 	b := bytes.NewReader(body)
 	playlist, _, err := m3u8.DecodeFrom(b, false)
@@ -235,6 +238,15 @@ func (t *Task) DownloadPartFile(PartUrl string, ExtXMap string) bool {
 }
 
 func (t *Task) StartDownload(ctx context.Context) {
+	defer func() {
+		fmt.Printf("(%s) task downloader stop feed path -> %s \n", t.ModelName, t.CurrentSaveFilePath)
+		t.PartDownFinished = []string{}
+		t.PartToDownload = []string{}
+		t.CurrentSegmentSequence = 0
+	}()
+	if t.HasStart && t.IsDownloaderStart {
+		return
+	}
 RESTART:
 	// create save dir if not exist
 	if t.Config.SaveDir == "" {
@@ -277,6 +289,12 @@ RESTART:
 			select {
 			case <-ctx.Done():
 				log.Printf("(%s) task stop download ... maybe model is offline", t.ModelName)
+				t.NotifyMessageChan <- NotifyMessage{
+					ModelName: t.ModelName,
+					Message:   "model live stream down finish",
+					SavePath:  t.CurrentSaveFilePath,
+					Type:      "down_finish",
+				}
 				return
 			case <-t.NewLiveStreamEvent:
 				t.PartDownFinished = []string{}
@@ -307,11 +325,11 @@ RESTART:
 }
 
 func (t *Task) Run() {
-	// defer close(t.StopChanEvent)
+	defer func() {
+		log.Printf("(%s) task stop...", t.ModelName)
+	}()
 	ctx, cancel := context.WithCancel(context.Background())
 	t.HasStart = true
-	t.GetPlayList()
-	go t.StartDownload(ctx)
 	for {
 		if ok, _ := t.IsOnline(); !ok {
 			log.Printf("(%s) Model is offline stop task...", t.ModelName)
@@ -322,6 +340,10 @@ func (t *Task) Run() {
 		} else {
 			// update current live stream play uri list
 			t.GetPlayList()
+			if !t.IsDownloaderStart {
+				go t.StartDownload(ctx)
+				t.IsDownloaderStart = true
+			}
 		}
 	}
 
