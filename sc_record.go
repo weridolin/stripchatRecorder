@@ -255,7 +255,7 @@ func (t *Task) DownloadPartFile(PartUrl string, ExtXMap string) bool {
 
 func (t *Task) StartDownload(ctx context.Context) {
 	defer func() {
-		log.Printf("(%s) task downloader stop feed path -> %s \n", t.ModelName, t.CurrentSaveFilePath)
+		log.Printf("(%s) task downloader stop feed path -> %s ", t.ModelName, t.CurrentSaveFilePath)
 		t.IsDownloaderStart = false
 	}()
 	if t.IsDownloaderStart {
@@ -331,6 +331,9 @@ func (t *Task) StartDownload(ctx context.Context) {
 					partUri := t.PartToDownload[0]
 					// fmt.Println("partUri:", partUri)
 					t.DownloadPartFile(partUri, t.ExtXMap)
+					if len(t.PartToDownload) == 0 {
+						continue
+					}
 					t.PartToDownload = t.PartToDownload[1:]
 					t.PartDownFinished = append(t.PartDownFinished, partUri)
 				}
