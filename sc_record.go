@@ -256,9 +256,6 @@ func (t *Task) DownloadPartFile(PartUrl string, ExtXMap string) bool {
 func (t *Task) StartDownload(ctx context.Context) {
 	defer func() {
 		log.Printf("(%s) task downloader stop feed path -> %s \n", t.ModelName, t.CurrentSaveFilePath)
-		// t.PartDownFinished = []string{}
-		// t.PartToDownload = []string{}
-		// t.CurrentSegmentSequence = 0
 		t.IsDownloaderStart = false
 	}()
 	if t.IsDownloaderStart {
