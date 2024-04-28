@@ -510,7 +510,7 @@ func main() {
 			}
 
 		}
-		log.Println("reload config file after 20s ....")
+		log.Printf("reload config file after 20s ... taskMap: %v", taskMap)
 		time.Sleep(20 * time.Second)
 	}
 }
