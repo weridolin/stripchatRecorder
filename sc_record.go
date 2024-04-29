@@ -428,7 +428,8 @@ func (t *Task) Run() {
 			log.Printf("(%s) GetPlayList failed, error: %s", t.ModelName, err)
 			cancel()
 			t.init()
-			t.TaskMap[t.ModelName] = nil
+			// t.TaskMap[t.ModelName] = nil
+			delete(t.TaskMap, t.ModelName)
 			return
 		}
 		if !t.IsDownloaderStart {
@@ -571,7 +572,7 @@ func main() {
 			if ok, _ := task.IsOnline(); !ok {
 				log.Printf("Model %s is offline", model.Name)
 				if _, ok := taskMap[model.Name]; ok {
-					taskMap[model.Name] = nil
+					delete(taskMap, model.Name)
 				}
 				continue
 			} else {
