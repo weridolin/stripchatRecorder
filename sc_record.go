@@ -414,6 +414,7 @@ func (t *Task) Downloader(ctx context.Context) {
 }
 
 func (t *Task) Run() {
+	log.Printf("(%s) task start running ....", t.ModelName)
 	defer func() {
 		log.Printf("(%s) task stop...", t.ModelName)
 	}()
@@ -579,6 +580,7 @@ func main() {
 					continue
 				}
 				taskMap[model.Name] = task
+
 				go task.Run()
 			}
 
