@@ -11,6 +11,7 @@ import (
 	"net/smtp"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
 
@@ -64,8 +65,9 @@ type GetCamInfoRespBrief struct {
 type DownloaderImpl interface {
 	IsOnline() (bool, string)
 	GetPlayList()
-	StartDownload(SaveDir string)
+	Downloader(SaveDir string)
 	DownloadPartFile(PartUrl string, ExtXMap string) bool
+	FileWriter()
 	Run()
 }
 
@@ -95,6 +97,8 @@ type Task struct {
 	NotifyMessageChan      chan<- NotifyMessage
 	// NewLiveStreamEvent     chan bool
 	IsDownloaderStart bool
+	IsFileWriterStart bool
+	DataMap           map[string][]byte
 }
 
 func NewTask(config Config, modelName string, taskMap map[string]*Task, notifyMessageChan chan<- NotifyMessage) *Task {
@@ -103,7 +107,7 @@ func NewTask(config Config, modelName string, taskMap map[string]*Task, notifyMe
 		ModelName:              modelName,
 		HasStart:               false,
 		SaveDir:                config.SaveDir,
-		CurrentSegmentSequence: 0,
+		CurrentSegmentSequence: -1,
 		StreamName:             "",
 		OnlineM3u8File:         "",
 		ExtXMap:                "",
@@ -114,12 +118,24 @@ func NewTask(config Config, modelName string, taskMap map[string]*Task, notifyMe
 		NotifyMessageChan:      notifyMessageChan,
 		// NewLiveStreamEvent: make(chan bool),
 		IsDownloaderStart: false,
+		IsFileWriterStart: false,
+		DataMap:           make(map[string][]byte),
+	}
+}
+
+func GetPartSequence(PartUrl string) string {
+	re := regexp.MustCompile(`_(\d+)_`)
+	match := re.FindStringSubmatch(PartUrl)
+	if len(match) > 0 {
+		return match[1]
+	} else {
+		return ""
 	}
 }
 
 func (t *Task) init() {
 	t.HasStart = false
-	t.CurrentSegmentSequence = 0
+	t.CurrentSegmentSequence = -1
 	t.StreamName = ""
 	t.OnlineM3u8File = ""
 	t.ExtXMap = ""
@@ -127,6 +143,7 @@ func (t *Task) init() {
 	t.PartDownFinished = []string{}
 	t.CurrentSaveFilePath = ""
 	t.IsDownloaderStart = false
+	t.IsFileWriterStart = false
 	t.SaveDir = ""
 }
 
@@ -186,11 +203,9 @@ func (t *Task) GetPlayList() error {
 	body, err := ioutil.ReadAll(resp.Body)
 	if err != nil {
 		log.Println("Read m3u8 file failed, error:", err)
-
 		return fmt.Errorf(fmt.Sprintf("Read m3u8 file failed, error: %s", err))
 	}
 	resp.Body.Close()
-	// log.Printf("body %s:", string(body))
 	b := bytes.NewReader(body)
 	playlist, _, err := m3u8.DecodeFrom(b, false)
 	if err != nil {
@@ -214,8 +229,6 @@ func (t *Task) GetPlayList() error {
 					t.ExtXMap = segment.Map.URI
 				} else if segment.Map != nil && t.ExtXMap != segment.Map.URI {
 					log.Printf("ExtXMap is not equal, %s, %s stop current live stream downloading and start new one", t.ExtXMap, segment.Map.URI)
-					// t.CurrentSegmentSequence = 0
-					// t.NewLiveStreamEvent <- true
 					return fmt.Errorf("ExtXMap is not equal")
 				}
 				// part file is not exist in PartToDownload and PartDownFinished,add to PartToDownload
@@ -231,8 +244,53 @@ func (t *Task) GetPlayList() error {
 	return nil
 }
 
+func (t *Task) FileWriter(ctx context.Context) {
+	log.Printf("(%s) task file writer start ...  ", t.ModelName)
+	t.IsFileWriterStart = true
+	// get data from map by sequence,start from t.CurrentSegmentSequence,if not exist,wait 2min max,else continue
+	file, _ := os.OpenFile(t.CurrentSaveFilePath, os.O_WRONLY|os.O_APPEND|os.O_CREATE, 0666)
+	defer file.Close()
+
+	// wait until t.DataMap is not empty and t.CurrentSegmentSequence is not -1
+WAIT:
+	if len(t.DataMap) == 0 || t.CurrentSegmentSequence == -1 {
+		time.Sleep(1 * time.Second)
+		goto WAIT
+	}
+
+	startIndex := t.CurrentSegmentSequence
+	for {
+		select {
+		case <-ctx.Done():
+			log.Printf("(%s) task stop write file ... maybe model is offline", t.ModelName)
+			t.IsFileWriterStart = false
+			return
+		default:
+			key := fmt.Sprintf("%d", startIndex)
+			fmt.Println("t.DataMap:", key, startIndex, t.CurrentSegmentSequence)
+			if data, ok := t.DataMap[key]; ok {
+				log.Printf("(%s) write data to file, sequence -> %s", t.ModelName, key)
+				file.Write(data)
+				delete(t.DataMap, key)
+			} else {
+				//wait 30s\
+				time.Sleep(30 * time.Second)
+				if data, ok := t.DataMap[key]; ok {
+					log.Printf("(%s) write data to file, sequence -> %s", t.ModelName, key)
+					file.Write(data)
+					delete(t.DataMap, key)
+					startIndex++
+				}
+			}
+			startIndex++
+		}
+	}
+
+}
+
 func (t *Task) DownloadPartFile(PartUrl string, ExtXMap string) bool {
 	// 1. down part file
+	// fmt.Println("download PartUrl:", PartUrl)
 	resp, err := http.Get(PartUrl)
 	if err != nil {
 		log.Printf("(%s) Download part file failed, error: %s. uri %s", t.ModelName, err, PartUrl)
@@ -244,16 +302,27 @@ func (t *Task) DownloadPartFile(PartUrl string, ExtXMap string) bool {
 			log.Printf("(%s) Download part file failed, error: %s. uri %s statusCode:%v \n response %s", t.ModelName, err, PartUrl, resp.StatusCode, data)
 			return false
 		} else {
-			file, _ := os.OpenFile(t.CurrentSaveFilePath, os.O_WRONLY|os.O_APPEND|os.O_CREATE, 0666)
-			defer file.Close()
-			file.Write(data)
-			log.Printf("(%s) Download part file success, uri %s", t.ModelName, PartUrl)
+			// get part squenence
+			partSequence := GetPartSequence(PartUrl)
+			if partSequence == "" {
+				log.Printf("(%s) Get part sequence failed, uri %s", t.ModelName, PartUrl)
+				return false
+			} else {
+				// add to map
+				log.Printf("(%s) Download part file success, uri %s,sequence -> %s ", t.ModelName, PartUrl, partSequence)
+				t.DataMap[partSequence] = data
+			}
+
+			// file, _ := os.OpenFile(t.CurrentSaveFilePath, os.O_WRONLY|os.O_APPEND|os.O_CREATE, 0666)
+			// defer file.Close()
+			// file.Write(data)
+			// log.Printf("(%s) Download part file success, uri %s", t.ModelName, PartUrl)
 		}
 	}
 	return true
 }
 
-func (t *Task) StartDownload(ctx context.Context) {
+func (t *Task) Downloader(ctx context.Context) {
 	defer func() {
 		log.Printf("(%s) task downloader stop feed path -> %s ", t.ModelName, t.CurrentSaveFilePath)
 		t.IsDownloaderStart = false
@@ -326,11 +395,12 @@ func (t *Task) StartDownload(ctx context.Context) {
 			// 	goto RESTART
 			default:
 				if len(t.PartToDownload) == 0 {
-					time.Sleep(2 * time.Second)
+					// time.Sleep(2 * time.Second)
+					continue
 				} else {
 					partUri := t.PartToDownload[0]
 					// fmt.Println("partUri:", partUri)
-					t.DownloadPartFile(partUri, t.ExtXMap)
+					go t.DownloadPartFile(partUri, t.ExtXMap)
 					if len(t.PartToDownload) == 0 {
 						continue
 					}
@@ -349,7 +419,7 @@ func (t *Task) Run() {
 	}()
 	ctx, cancel := context.WithCancel(context.Background())
 	t.HasStart = true
-
+	go t.FileWriter(ctx)
 	for {
 		err := t.GetPlayList()
 		if err != nil {
@@ -361,7 +431,7 @@ func (t *Task) Run() {
 			return
 		}
 		if !t.IsDownloaderStart {
-			go t.StartDownload(ctx)
+			go t.Downloader(ctx)
 		}
 	}
 	// }
