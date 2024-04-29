@@ -571,9 +571,7 @@ func main() {
 			task := NewTask(config, model.Name, taskMap, notifyMessageChan)
 			if ok, _ := task.IsOnline(); !ok {
 				log.Printf("Model %s is offline", model.Name)
-				if _, ok := taskMap[model.Name]; ok {
-					delete(taskMap, model.Name)
-				}
+				delete(taskMap, model.Name)
 				continue
 			} else {
 				if _, ok := taskMap[model.Name]; ok {
