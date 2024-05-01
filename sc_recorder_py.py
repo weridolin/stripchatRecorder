@@ -7,8 +7,8 @@ import asyncio
 import os
 import datetime
 import re
-os.environ['HTTP_PROXY'] = 'http://127.0.0.1:10809'
-os.environ['HTTPS_PROXY'] = 'http://127.0.0.1:10809'
+# os.environ['HTTP_PROXY'] = 'http://127.0.0.1:10809'
+# os.environ['HTTPS_PROXY'] = 'http://127.0.0.1:10809'
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
@@ -231,6 +231,10 @@ class TaskManager:
             return
 
     async def run_forever(self):
+        config = get_config(self.config)
+        if config['proxy']['enable']:
+            os.environ['HTTP_PROXY'] = config['proxy']['enable']['uri']
+            os.environ['HTTPS_PROXY'] = config['proxy']['enable']['uri']
         while True:
             config = get_config(self.config)
             for model in config['models']:
