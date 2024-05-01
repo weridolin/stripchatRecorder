@@ -6,7 +6,7 @@ import logging
 import asyncio
 import os
 import datetime
-
+import re
 os.environ['HTTP_PROXY'] = 'http://127.0.0.1:10809'
 os.environ['HTTPS_PROXY'] = 'http://127.0.0.1:10809'
 
@@ -15,6 +15,15 @@ logger.setLevel(logging.INFO)
 
 
 class FlagNotSameError(Exception):
+    pass
+
+class TaskFinishError(Exception):
+    pass
+
+class ModelOfflineError(Exception):
+    def __init__(self,model_name ,*args) -> None:
+        self.model_name = model_name
+        super().__init__(*args)
     pass
 
 class TaskMixin:
@@ -26,6 +35,8 @@ class TaskMixin:
         self.stream_name = None # 当前stream name
         self.part_to_down = list() # 等待下载的片段列表 
         self.part_down_finish = list() # 正在下载的片段列表
+        self.data_map = {} # 存储下载的数据
+        self.current_save_path = None # 保存路径
 
     async def is_online(self,model_name):
         try:
@@ -57,64 +68,101 @@ class TaskMixin:
                 m3u8_obj = m3u8.loads(await resp.text())
                 if m3u8_obj.media_sequence > self.current_segment_sequence:
                     ## 有新的片段
-                    print(f"New segment sequence -> {m3u8_obj.media_sequence}")
                     for segment in m3u8_obj.segments:
-                        if self.ext_x_map and segment.init_section.uri != self.ext_x_map:
-                            self.ext_x_map = segment.init_section.uri # 替换成最新的 ext_x_map 
-                            self.current_segment_sequence = 0
-                            raise FlagNotSameError(f"({self.model_name}) xt_x_map is not the same")
-                        if segment.uri not in self.part_to_down and  segment.uri not in self.part_down_finish:
+                        print(f"({self.model_name}) New segment -> {segment.uri}")
+                        # if self.ext_x_map and segment.init_section.uri != self.ext_x_map:
+                        #     self.ext_x_map = segment.init_section.uri # 替换成最新的 ext_x_map 
+                        #     self.current_segment_sequence = 0
+                        #     raise FlagNotSameError(f"({self.model_name}) xt_x_map is not the same")
+                        if segment.uri not in self.part_to_down and  segment.uri not in self.part_down_finish :
                             self.part_to_down.append(segment.uri)
-                        print(f"add part uri -> {segment.uri}")
                         if not self.ext_x_map:
                             self.ext_x_map = segment.init_section.uri
                             # print(f"ext_x_map -> {self.ext_x_map}")
                     self.current_segment_sequence = m3u8_obj.media_sequence
                 else:
-                    print(f"No new segment,  sequence ->  {m3u8_obj.media_sequence}, current sequence -> {self.current_segment_sequence}")
+                    # check if model still online   
+                    if not await self.is_online(self.model_name):
+                        self.stop_flag = True
+                        # self.has_start = False
+                        raise ModelOfflineError(self.model_name,f"({self.model_name}) is not online")
+
+                #     print(f"No new segment,  sequence ->  {m3u8_obj.media_sequence}, current sequence -> {self.current_segment_sequence}")
         return m3u8_obj
 
     
     
-    async def download_part_file(self,ext_x_map:str,part_uri):
+    async def download_part_file(self,part_uri):
+        sequence = self._get_sequence(part_uri)
+        if not sequence:
+            print(f"({self.model_name}) Can't get sequence from part uri -> {part_uri}")
+            return
         try:
             async with aiohttp.ClientSession() as session:
                 async with session.get(part_uri) as resp:
                     if resp.status == 200:
-                        save_file = os.path.join(self.save_dir,ext_x_map.rsplit('/')[-1])
-                        print(f"Downloading {part_uri} to {save_file}")
-                        with open(save_file, "ab") as f:
-                            f.write(await resp.read())
-                        print(f"({self.model_name}) Downloading {part_uri} to {save_file} finish")
+                        print(f"({self.model_name}) Downloading {part_uri} to {self.current_save_path}")
+                        # with open(self.current_save_path, "ab") as f:
+                        #     f.write(await resp.read())
+                        self.data_map[sequence] = await resp.read()
+                        print(f"({self.model_name}) Downloading {part_uri} to {self.current_save_path} finish")
                     else:
-                        print(f"({self.model_name}) Downloading {part_uri} failed , status code -> {resp.status},response -> {await resp.text()}")
-                    # self.part_downing.remove(part_uri)
-                        # self.part_to_down[ext_x_map].remove(part_uri)
+                        print(f"({self.model_name}) Downloading {part_uri} failed , status code -> {resp.status},response -> {await resp.text()}") 
         except:
             logger.exception("Error while downloading part file", exc_info=True)
+        finally:
+            self.part_down_finish.remove(part_uri)
 
-    async def _start_download(self):
+    async def _start_downloader(self):
         # if self.part_to_down:
         if not os.path.exists(self.save_dir):
             os.makedirs(self.save_dir)
 
         if self.ext_x_map:
             ## 下载init文件
-            save_file = os.path.join(self.save_dir,self.ext_x_map.rsplit('/')[-1])
-            if not os.path.exists(save_file):
+            self.current_save_path = os.path.join(self.save_dir,self.ext_x_map.rsplit('/')[-1])
+            if not os.path.exists(self.current_save_path):
                 async with aiohttp.ClientSession() as session:
                     async with session.get(self.ext_x_map) as resp:
                         if resp.status == 200:
-                            print(f"Downloading init file {self.ext_x_map} to {save_file}") 
-                            with open(save_file, "ab") as f:
-                                f.write(await resp.read())               
-                print(f"down load init file finish... begin to down part file...")
-        while self.part_to_down:
-            part_uri = self.part_to_down.pop(0)
-            self.part_down_finish.append(part_uri)
-            await self.download_part_file(self.ext_x_map,part_uri)
-            if self.stop_flag:
-                break
+                            print(f"({self.model_name}) Downloading init file {self.ext_x_map} to {self.current_save_path} success...") 
+                            with open(self.current_save_path, "ab") as f:
+                                f.write(await resp.read())
+                        else:
+                            print(f"({self.model_name}) Downloading init file {self.ext_x_map} failed , status code -> {resp.status},response -> {await resp.text()}")              
+                print(f"({self.model_name}) down load init file finish... begin to down part file...")
+
+        while not self.stop_flag:
+            if len(self.part_to_down) == 0:
+                print(f"({self.model_name}) No part to download, check again after 5s ...")
+                await asyncio.sleep(5)
+            else:
+                part_uri = self.part_to_down.pop(0)
+                loop=asyncio.get_event_loop()
+                self.part_down_finish.append(part_uri)
+                loop.create_task(self.download_part_file(part_uri))
+
+    async def _start_writer(self):
+        start_sequence = self.current_segment_sequence
+        while not self.stop_flag:
+            if start_sequence in self.data_map.keys():
+                with open(self.current_save_path, "ab") as f:
+                    f.write(self.data_map[start_sequence])
+                print(f"({self.model_name}) Write data to {self.current_save_path} success")
+                _  = self.data_map.pop(start_sequence)
+                del _
+                start_sequence += 1
+            else:
+                print(f"({self.model_name}) No data to write, check again after 20s ...")
+                await asyncio.sleep(20)
+        
+    def _get_sequence(self,partUri:str):
+        # get sequence from partUri
+        pat = re.compile(r'_(\d+)_')
+        if pat.search(partUri):
+            return int(pat.search(partUri).group(1))
+        else:
+            return None
 
 class Task(TaskMixin):
 
@@ -125,24 +173,38 @@ class Task(TaskMixin):
         self.save_dir = os.path.join(save_dir, model_name,datetime.datetime.now().strftime("%Y-%m-%d"))
         super().__init__()
         
+    def __delete__(self):
+        self.stop_flag = True
+        self.has_start = False
+        self.part_to_down.clear()
+        self.part_down_finish.clear()
+        self.data_map.clear()
 
     async def start(self):
+        m3u8_uri,stream_name = await self.is_online(self.model_name)
+        if m3u8_uri and stream_name:
+            self.online_mu3u8_uri = m3u8_uri
+            self.stream_name = stream_name
+            await self.get_play_list(m3u8_uri)
+
+            loop = asyncio.get_event_loop()
+            loop.create_task(self._start_downloader())
+            loop.create_task(self._start_writer())
+        else:
+            print(f"{self.model_name} is not online,stop task... check after 20s")
+            self.stop_flag = True
+            await asyncio.sleep(2)
+            self.has_start = False
+            raise ModelOfflineError(self.model_name,f"({self.model_name}) is not online")
+
         while not self.stop_flag:
             self.has_start = True
             try:
-                m3u8_uri,stream_name = await self.is_online(self.model_name)
-                if m3u8_uri and stream_name:
-                    self.online_mu3u8_uri = m3u8_uri
-                    self.stream_name = stream_name
-                    await self.get_play_list(m3u8_uri)
-                    await self._start_download()
-                else:
-                    print(f"{self.model_name} is not online,check again after 20s ...")
-                    await asyncio.sleep(20)
-            except FlagNotSameError:
-                logger.error("ext_x_map is not the same, begin restart after 5s ...")
-                self.current_segment_sequence=0
-                await asyncio.sleep(5)
+                await self.get_play_list(self.online_mu3u8_uri)
+            # except FlagNotSameError:
+            #     logger.error("ext_x_map is not the same, begin restart after 5s ...")
+            #     self.current_segment_sequence=0
+            #     await asyncio.sleep(5)
             except:
                 logger.exception("Error while starting task,begin restart after 5s ...", exc_info=True)
                 self.current_segment_sequence=0
@@ -161,13 +223,12 @@ class TaskManager:
 
     def add_task(self, task: Task):
         if task.model_name not in self.task_map:
-            print(f"Add new model -> {task.model_name}")
+            print(f"({task.model_name}) Add new model -> {task.model_name}")
             self.task_map[task.model_name] = task
             loop = asyncio.get_event_loop()
-            loop.create_task(task.start())
+            loop.create_task(task.start()).add_done_callback(self.on_task_done)
         else:
             return
-        #task.start()
 
     async def run_forever(self):
         while True:
@@ -175,8 +236,22 @@ class TaskManager:
             for model in config['models']:
                 task = Task(model['name'], config["save_dir"])
                 self.add_task(task)
-            await asyncio.sleep(10)
-            print("reload config... current running models -> ", list(self.task_map.keys()))
+            print("reload config after 20s... current running models -> ", list(self.task_map.keys()))
+            await asyncio.sleep(20)
+
+    
+    def on_task_done(self, future):
+        # print(f"Task done -> {future.result()}") # if future.result() error will raise exception
+        error = future.exception()
+        if error:
+            if isinstance(error, ModelOfflineError):
+                print(f"({error.model_name}) Model is offline delete task...")
+                t =  self.task_map.pop(error.model_name)
+                del t
+            else:
+                print(f"Task error -> {error}")
+        # else:
+        #     print(f"({self.}) Task done success")
 
 if __name__ == "__main__":
     config_file = "./config.json"
