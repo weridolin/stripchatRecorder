@@ -42,8 +42,8 @@ class TaskMixin:
             async with aiohttp.ClientSession(trust_env=True) as session:
                 async with session.get(f'https://stripchat.com/api/front/v2/models/username/{model_name}/cam') as resp:
                     resp = await resp.json()
-            with open(f'./{model_name}.json', "w", encoding="utf8") as f:
-                json.dump(resp, f, ensure_ascii=False, indent=4)
+            # with open(f'./{model_name}.json', "w", encoding="utf8") as f:
+            #     json.dump(resp, f, ensure_ascii=False, indent=4)
             m3u8_file = None
             if 'cam' in resp.keys():
                 if {'isCamAvailable', 'streamName', 'viewServers'} <= resp['cam'].keys():
@@ -80,6 +80,7 @@ class TaskMixin:
                     if not await self.is_online(self.model_name):
                         self.stop_flag = True
                         # self.has_start = False
+                        print(f"({self.model_name}) Model is offline, raise ModelOfflineError...")
                         raise ModelOfflineError(self.model_name,f"({self.model_name}) is not online")
 
                 #     print(f"No new segment,  sequence ->  {m3u8_obj.media_sequence}, current sequence -> {self.current_segment_sequence}")
@@ -197,16 +198,16 @@ class Task(TaskMixin):
 
         while not self.stop_flag:
             self.has_start = True
-            try:
-                await self.get_play_list(self.online_mu3u8_uri)
+            # try:
+            await self.get_play_list(self.online_mu3u8_uri)
             # except FlagNotSameError:
             #     logger.error("ext_x_map is not the same, begin restart after 5s ...")
             #     self.current_segment_sequence=0
             #     await asyncio.sleep(5)
-            except:
-                logger.exception("Error while starting task,begin restart after 5s ...", exc_info=True)
-                self.current_segment_sequence=0
-                await asyncio.sleep(5)
+            # except:
+            #     logger.exception("Error while starting task,begin restart after 5s ...", exc_info=True)
+            #     self.current_segment_sequence=0
+            #     await asyncio.sleep(5)
 
 
 def get_config(config_file):
