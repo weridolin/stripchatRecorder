@@ -7,8 +7,7 @@ import asyncio
 import os
 import datetime
 import re
-# os.environ['HTTP_PROXY'] = 'http://127.0.0.1:10809'
-# os.environ['HTTPS_PROXY'] = 'http://127.0.0.1:10809'
+import aiofiles
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
@@ -70,10 +69,6 @@ class TaskMixin:
                     ## 有新的片段
                     for segment in m3u8_obj.segments:
                         print(f"({self.model_name}) New segment -> {segment.uri}")
-                        # if self.ext_x_map and segment.init_section.uri != self.ext_x_map:
-                        #     self.ext_x_map = segment.init_section.uri # 替换成最新的 ext_x_map 
-                        #     self.current_segment_sequence = 0
-                        #     raise FlagNotSameError(f"({self.model_name}) xt_x_map is not the same")
                         if segment.uri not in self.part_to_down and  segment.uri not in self.part_down_finish :
                             self.part_to_down.append(segment.uri)
                         if not self.ext_x_map:
@@ -146,8 +141,11 @@ class TaskMixin:
         start_sequence = self.current_segment_sequence
         while not self.stop_flag:
             if start_sequence in self.data_map.keys():
-                with open(self.current_save_path, "ab") as f:
-                    f.write(self.data_map[start_sequence])
+                # with open(self.current_save_path, "ab") as f:
+                #     f.write(self.data_map[start_sequence])
+                async with aiofiles.open(self.current_save_path, 'ab') as afp:
+                    await afp.write(self.data_map[start_sequence])
+                    # await afp.write("world")
                 print(f"({self.model_name}) Write data to {self.current_save_path} success")
                 _  = self.data_map.pop(start_sequence)
                 del _
@@ -233,8 +231,8 @@ class TaskManager:
     async def run_forever(self):
         config = get_config(self.config)
         if config['proxy']['enable']:
-            os.environ['HTTP_PROXY'] = config['proxy']['enable']['uri']
-            os.environ['HTTPS_PROXY'] = config['proxy']['enable']['uri']
+            os.environ['HTTP_PROXY'] = config['proxy']['uri']
+            os.environ['HTTPS_PROXY'] = config['proxy']['uri']
         while True:
             config = get_config(self.config)
             for model in config['models']:
