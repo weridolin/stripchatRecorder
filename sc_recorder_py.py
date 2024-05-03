@@ -31,7 +31,7 @@ class TaskMixin:
         self.ext_x_map = None  # 同次直播流对应的唯一标记
         self.online_mu3u8_uri = None ## 直播流地址
         self.current_segment_sequence = 0 # 当前直播流第几个序列片段
-        self.stream_name = None # 当前stream name
+        self.stream_name = None # 当前stream names
         self.part_to_down = list() # 等待下载的片段列表 
         self.part_down_finish = list() # 正在下载的片段列表
         self.data_map = {} # 存储下载的数据
@@ -50,7 +50,7 @@ class TaskMixin:
                     # streamName is the live mu3u8 stream file name
                     if 'flashphoner-hls' in resp['cam']['viewServers'].keys() and resp['cam']['isCamAvailable'] and resp['cam']['isCamAvailable']:
                         m3u8_file = f'https://b-{resp["cam"]["viewServers"]["flashphoner-hls"]}.doppiocdn.com/hls/{resp["cam"]["streamName"]}/{resp["cam"]["streamName"]}.m3u8'
-                        print(f"model -> {model_name} is online, stream m3u8 file -> {m3u8_file}, steam name -> {resp['cam']['streamName']}")
+                        # print(f"model -> {model_name} is online, stream m3u8 file -> {m3u8_file}, steam name -> {resp['cam']['streamName']}")
                     else:
                         return False,None
             if m3u8_file:
@@ -68,12 +68,11 @@ class TaskMixin:
                 if m3u8_obj.media_sequence > self.current_segment_sequence:
                     ## 有新的片段
                     for segment in m3u8_obj.segments:
-                        print(f"({self.model_name}) New segment -> {segment.uri}")
                         if segment.uri not in self.part_to_down and  segment.uri not in self.part_down_finish :
+                            print(f"({self.model_name}) New segment -> {segment.uri}")
                             self.part_to_down.append(segment.uri)
                         if not self.ext_x_map:
                             self.ext_x_map = segment.init_section.uri
-                            # print(f"ext_x_map -> {self.ext_x_map}")
                     self.current_segment_sequence = m3u8_obj.media_sequence
                 else:
                     # check if model still online   
@@ -82,8 +81,6 @@ class TaskMixin:
                         # self.has_start = False
                         print(f"({self.model_name}) Model is offline, raise ModelOfflineError...")
                         raise ModelOfflineError(self.model_name,f"({self.model_name}) is not online")
-
-                #     print(f"No new segment,  sequence ->  {m3u8_obj.media_sequence}, current sequence -> {self.current_segment_sequence}")
         return m3u8_obj
 
     
@@ -97,17 +94,17 @@ class TaskMixin:
             async with aiohttp.ClientSession() as session:
                 async with session.get(part_uri) as resp:
                     if resp.status == 200:
-                        print(f"({self.model_name}) Downloading {part_uri} to {self.current_save_path}")
+                        # print(f"({self.model_name}) Downloading {part_uri} to {self.current_save_path}")
                         # with open(self.current_save_path, "ab") as f:
                         #     f.write(await resp.read())
                         self.data_map[sequence] = await resp.read()
-                        print(f"({self.model_name}) Downloading {part_uri} to {self.current_save_path} finish")
+                        print(f"({self.model_name}) Downloading {part_uri} to {self.current_save_path} finish, sequence keys -> {self.data_map.keys()}")
                     else:
                         print(f"({self.model_name}) Downloading {part_uri} failed , status code -> {resp.status},response -> {await resp.text()}") 
         except:
             logger.exception("Error while downloading part file", exc_info=True)
-        finally:
-            self.part_down_finish.remove(part_uri)
+        # finally:
+        #     self.part_down_finish.remove(part_uri)
 
     async def _start_downloader(self):
         # if self.part_to_down:
@@ -134,26 +131,26 @@ class TaskMixin:
                 await asyncio.sleep(5)
             else:
                 part_uri = self.part_to_down.pop(0)
-                loop=asyncio.get_event_loop()
                 self.part_down_finish.append(part_uri)
+                loop=asyncio.get_event_loop()
                 loop.create_task(self.download_part_file(part_uri))
+                await asyncio.sleep(0)
 
     async def _start_writer(self):
         start_sequence = self.current_segment_sequence
         while not self.stop_flag:
+            # print(">>>>",start_sequence,self.data_map.keys())
             if start_sequence in self.data_map.keys():
                 # with open(self.current_save_path, "ab") as f:
                 #     f.write(self.data_map[start_sequence])
                 async with aiofiles.open(self.current_save_path, 'ab') as afp:
                     await afp.write(self.data_map[start_sequence])
-                    # await afp.write("world")
-                print(f"({self.model_name}) Write data to {self.current_save_path} success")
+                print(f"({self.model_name}) Write data to {self.current_save_path} success,sequence -> {start_sequence}...")
                 _  = self.data_map.pop(start_sequence)
                 del _
                 start_sequence += 1
             else:
-                print(f"({self.model_name}) No data to write, check again after 20s ...")
-                await asyncio.sleep(20)
+                await asyncio.sleep(0)
         
     def _get_sequence(self,partUri:str):
         # get sequence from partUri
@@ -188,7 +185,7 @@ class Task(TaskMixin):
 
             loop = asyncio.get_event_loop()
             loop.create_task(self._start_downloader())
-            loop.create_task(self._start_writer())
+            loop.create_task(self._start_writer()).add_done_callback(self._on_writer_error_callback)
         else:
             print(f"{self.model_name} is not online,stop task... check after 20s")
             self.stop_flag = True
@@ -200,6 +197,7 @@ class Task(TaskMixin):
             self.has_start = True
             # try:
             await self.get_play_list(self.online_mu3u8_uri)
+            await asyncio.sleep(0)
             # except FlagNotSameError:
             #     logger.error("ext_x_map is not the same, begin restart after 5s ...")
             #     self.current_segment_sequence=0
@@ -209,6 +207,9 @@ class Task(TaskMixin):
             #     self.current_segment_sequence=0
             #     await asyncio.sleep(5)
 
+    def _on_writer_error_callback(self, future):
+        error = future.exception()
+        print(f"Task error -> {error}")
 
 def get_config(config_file):
     with open(config_file) as f:

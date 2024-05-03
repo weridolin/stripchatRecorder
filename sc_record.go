@@ -310,7 +310,7 @@ func (t *Task) DownloadPartFile(PartUrl string, ExtXMap string) bool {
 			} else {
 				// add to map
 				log.Printf("(%s) Download part file success, uri %s,sequence -> %s ", t.ModelName, PartUrl, partSequence)
-				t.DataMap[partSequence] = data
+				// t.DataMap[partSequence] = data
 			}
 
 			// file, _ := os.OpenFile(t.CurrentSaveFilePath, os.O_WRONLY|os.O_APPEND|os.O_CREATE, 0666)
