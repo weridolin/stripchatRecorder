@@ -103,8 +103,10 @@ class TaskMixin:
                         print(f"({self.model_name}) Downloading {part_uri} failed , status code -> {resp.status},response -> {await resp.text()}") 
         except:
             logger.exception("Error while downloading part file", exc_info=True)
-        # finally:
-        #     self.part_down_finish.remove(part_uri)
+        finally:
+            ## 只保留最近100条记录
+            if self.part_down_finish and len(self.part_down_finish) > 100:
+                self.part_down_finish = self.part_down_finish[-100:]
 
     async def _start_downloader(self):
         # if self.part_to_down:
