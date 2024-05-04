@@ -12,7 +12,6 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
-	"strconv"
 	"strings"
 	"time"
 
@@ -230,12 +229,12 @@ func (t *Task) GetPlayList() error {
 					t.ExtXMap = segment.Map.URI
 				} else if segment.Map != nil && t.ExtXMap != segment.Map.URI {
 					log.Printf("ExtXMap is not equal, %s, %s stop current live stream downloading and start new one", t.ExtXMap, segment.Map.URI)
-					return fmt.Errorf("ExtXMap is not equal")
+					// return fmt.Errorf("ExtXMap is not equal")
 				}
 				// part file is not exist in PartToDownload and PartDownFinished,add to PartToDownload
 				if !Contains(t.PartToDownload, segment.URI) && !Contains(t.PartDownFinished, segment.URI) {
 					t.PartToDownload = append(t.PartToDownload, segment.URI)
-					log.Printf("(%s) add new segment to PartToDownload list: %s", t.ModelName, segment.URI)
+					log.Printf("(%s) add new segment to PartToDownload list: %s,current task data map %v", t.ModelName, segment.URI, len(t.DataMap))
 					continue
 				}
 			}
@@ -272,27 +271,32 @@ WAIT:
 				log.Printf("(%s) write data to file, sequence -> %s", t.ModelName, key)
 				file.Write(data)
 				delete(t.DataMap, key)
+				startIndex++
 			} else {
-				//wait 30s\
-				time.Sleep(20 * time.Second)
+				//wait 30s
+				time.Sleep(10 * time.Second)
+			LOOP:
 				if data, ok := t.DataMap[key]; ok {
 					log.Printf("(%s) write data to file, sequence -> %s", t.ModelName, key)
 					file.Write(data)
 					delete(t.DataMap, key)
 					startIndex++
 				} else {
-					// get mini sequence from t.DataMap by key
-					miniSequence := 100000
-					for k, _ := range t.DataMap {
-						if kInt, _ := strconv.Atoi(k); kInt < miniSequence {
-							miniSequence = kInt
-						}
-					}
-					startIndex = miniSequence
-					continue
+					startIndex++
+					goto LOOP
 				}
+				// else {
+				// 	// get mini sequence from t.DataMap by key
+				// 	// miniSequence := 100000
+				// 	// for k, _ := range t.DataMap {
+				// 	// 	if kInt, _ := strconv.Atoi(k); kInt < miniSequence {
+				// 	// 		miniSequence = kInt
+				// 	// 	}
+				// 	// }
+				// 	// startIndex = miniSequence
+				// 	continue
+				// }
 			}
-			startIndex++
 		}
 	}
 

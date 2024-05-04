@@ -159,8 +159,18 @@ class TaskMixin:
             else:
                 await asyncio.sleep(10)
                 # wait 10s ,if still not get the data, ignore this sequence
-                if start_sequence not in self.data_map.keys() and self.data_map.keys():
-                    start_sequence = min(self.data_map.keys())
+                # if start_sequence not in self.data_map.keys() and self.data_map.keys():
+                #     start_sequence = min(self.data_map.keys())
+                if start_sequence in self.data_map.keys():
+                    continue
+                else:
+                    start_sequence += 1
+                    ## delete ignore data
+                    for key,_ in self.data_map.items():
+                        if key < start_sequence:
+                            _ = self.data_map.pop(key)
+                            del _
+            
 
         
     def _get_sequence(self,partUri:str):
