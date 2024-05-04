@@ -13,7 +13,7 @@ import logging
 logger = logging.getLogger('logger')
 logger.setLevel(logging.INFO)
 sh = logging.StreamHandler()
-fh = logging.FileHandler("./record.log", encoding="utf-8")
+fh = logging.FileHandler("./err_record.log", encoding="utf-8")
 logger.addHandler(sh)
 logger.addHandler(fh)
 
