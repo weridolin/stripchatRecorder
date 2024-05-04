@@ -150,6 +150,9 @@ class TaskMixin:
         start_sequence = self.current_segment_sequence
         while not self.stop_flag:
             if start_sequence in self.data_map.keys():
+                if not self.current_save_path:
+                    print(f"({self.model_name}) Save path is not set, wait... -> {start_sequence}")
+                    continue
                 async with aiofiles.open(self.current_save_path, 'ab') as afp:
                     await afp.write(self.data_map[start_sequence])
                 print(f"({self.model_name}) Write data to {self.current_save_path} success,sequence -> {start_sequence}...")
@@ -159,19 +162,17 @@ class TaskMixin:
             else:
                 await asyncio.sleep(10)
                 # wait 10s ,if still not get the data, ignore this sequence
-                # if start_sequence not in self.data_map.keys() and self.data_map.keys():
-                #     start_sequence = min(self.data_map.keys())
                 if start_sequence in self.data_map.keys():
                     continue
                 else:
                     start_sequence += 1
                     ## delete ignore data
-                    for key,_ in self.data_map.items():
+                    for key in list(self.data_map.keys()):
                         if key < start_sequence:
+                            print(f"({self.model_name}) Delete ignore data -> {key}")
                             _ = self.data_map.pop(key)
                             del _
-            
-
+        
         
     def _get_sequence(self,partUri:str):
         # get sequence from partUri
@@ -233,10 +234,14 @@ class Task(TaskMixin):
 
     def _on_writer_done(self, future):
         error = future.exception()
+        import sys
         if error:
-            logger.error(f"({self.model_name}) Writer error -> {error}")
+            logger.error(f"({self.model_name}) Writer error -> {error}",exc_info=True)
+            # sys.exit(1)
         else:
             print(f"({self.model_name}) Writer done...")
+            # sys.exit(1)
+
 
 def get_config(config_file):
     with open(config_file) as f:

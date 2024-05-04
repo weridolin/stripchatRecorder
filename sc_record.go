@@ -12,6 +12,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -280,6 +281,12 @@ WAIT:
 					log.Printf("(%s) write data to file, sequence -> %s", t.ModelName, key)
 					file.Write(data)
 					delete(t.DataMap, key)
+					// remove data that sequence smaller than startIndex
+					for k, _ := range t.DataMap {
+						if kInt, _ := strconv.Atoi(k); kInt < startIndex {
+							delete(t.DataMap, k)
+						}
+					}
 					startIndex++
 				} else {
 					startIndex++
