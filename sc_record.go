@@ -12,6 +12,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -250,7 +251,6 @@ func (t *Task) FileWriter(ctx context.Context) {
 	// get data from map by sequence,start from t.CurrentSegmentSequence,if not exist,wait 2min max,else continue
 	file, _ := os.OpenFile(t.CurrentSaveFilePath, os.O_WRONLY|os.O_APPEND|os.O_CREATE, 0666)
 	defer file.Close()
-
 	// wait until t.DataMap is not empty and t.CurrentSegmentSequence is not -1
 WAIT:
 	if len(t.DataMap) == 0 || t.CurrentSegmentSequence == -1 {
@@ -274,12 +274,22 @@ WAIT:
 				delete(t.DataMap, key)
 			} else {
 				//wait 30s\
-				time.Sleep(30 * time.Second)
+				time.Sleep(20 * time.Second)
 				if data, ok := t.DataMap[key]; ok {
 					log.Printf("(%s) write data to file, sequence -> %s", t.ModelName, key)
 					file.Write(data)
 					delete(t.DataMap, key)
 					startIndex++
+				} else {
+					// get mini sequence from t.DataMap by key
+					miniSequence := 100000
+					for k, _ := range t.DataMap {
+						if kInt, _ := strconv.Atoi(k); kInt < miniSequence {
+							miniSequence = kInt
+						}
+					}
+					startIndex = miniSequence
+					continue
 				}
 			}
 			startIndex++
@@ -310,13 +320,8 @@ func (t *Task) DownloadPartFile(PartUrl string, ExtXMap string) bool {
 			} else {
 				// add to map
 				log.Printf("(%s) Download part file success, uri %s,sequence -> %s ", t.ModelName, PartUrl, partSequence)
-				// t.DataMap[partSequence] = data
+				t.DataMap[partSequence] = data
 			}
-
-			// file, _ := os.OpenFile(t.CurrentSaveFilePath, os.O_WRONLY|os.O_APPEND|os.O_CREATE, 0666)
-			// defer file.Close()
-			// file.Write(data)
-			// log.Printf("(%s) Download part file success, uri %s", t.ModelName, PartUrl)
 		}
 	}
 	return true
@@ -406,6 +411,10 @@ func (t *Task) Downloader(ctx context.Context) {
 					}
 					t.PartToDownload = t.PartToDownload[1:]
 					t.PartDownFinished = append(t.PartDownFinished, partUri)
+					// partDownFinished list only save current 100 records
+					if len(t.PartDownFinished) >= 100 {
+						t.PartDownFinished = t.PartDownFinished[len(t.PartDownFinished)-100:]
+					}
 				}
 			}
 		}
@@ -579,7 +588,6 @@ func main() {
 					continue
 				}
 				taskMap[model.Name] = task
-
 				go task.Run()
 			}
 
