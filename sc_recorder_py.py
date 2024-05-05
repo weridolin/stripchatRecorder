@@ -72,7 +72,7 @@ class TaskMixin:
                         ## 有新的片段
                         for segment in m3u8_obj.segments:
                             if segment.uri not in self.part_to_down and  segment.uri not in self.part_down_finish :
-                                print(f"({self.model_name}) New segment -> {segment.uri}")
+                                print(f"({self.model_name}) add new segment -> {segment.uri}")
                                 self.part_to_down.append(segment.uri)
                             if not self.ext_x_map:
                                 self.ext_x_map = segment.init_section.uri
@@ -112,11 +112,9 @@ class TaskMixin:
                 self.part_down_finish = self.part_down_finish[-100:]
 
     async def _start_downloader(self):
-        # if self.part_to_down:
         try:
             if not os.path.exists(self.save_dir):
                 os.makedirs(self.save_dir)
-
             if self.ext_x_map:
                 ## 下载init文件
                 self.current_save_path = os.path.join(self.save_dir,self.ext_x_map.rsplit('/')[-1])
@@ -161,6 +159,7 @@ class TaskMixin:
                 start_sequence += 1
             else:
                 await asyncio.sleep(10)
+                print(f"({self.model_name}) wait 10s to get data...,current sequence -> {start_sequence}")
                 # wait 10s ,if still not get the data, ignore this sequence
                 if start_sequence in self.data_map.keys():
                     continue
@@ -172,8 +171,19 @@ class TaskMixin:
                             print(f"({self.model_name}) Delete ignore data -> {key}")
                             _ = self.data_map.pop(key)
                             del _
-        
-        
+        # write all rest data
+        if self.data_map.keys():
+            print(f"({self.model_name}) Write rest data to {self.current_save_path}...keys:{self.data_map.keys()}")
+            start = min(self.data_map.keys())
+            while self.data_map.keys():
+                if start in self.data_map.keys():
+                    async with aiofiles.open(self.current_save_path, 'ab') as afp:
+                        await afp.write(self.data_map[start])
+                    print(f"({self.model_name}) Write data to {self.current_save_path} success,sequence -> {start}...")
+                    _  = self.data_map.pop(start)
+                    del _
+                start += 1
+
     def _get_sequence(self,partUri:str):
         # get sequence from partUri
         pat = re.compile(r'_(\d+)_')
@@ -205,16 +215,16 @@ class Task(TaskMixin):
             self.stream_name = stream_name
             await self.get_play_list(m3u8_uri)
 
-            loop = asyncio.get_event_loop()
-            loop.create_task(self._start_downloader()).add_done_callback(self._on_downloader_done)
-            loop.create_task(self._start_writer()).add_done_callback(self._on_writer_done)
         else:
             print(f"{self.model_name} is not online,stop task... check after 20s")
             self.stop_flag = True
             await asyncio.sleep(2)
             self.has_start = False
-            # raise ModelOfflineError(self.model_name,f"({self.model_name}) is not online")
             return self
+
+        loop = asyncio.get_event_loop()
+        loop.create_task(self._start_downloader()).add_done_callback(self._on_downloader_done)
+        loop.create_task(self._start_writer()).add_done_callback(self._on_writer_done)
 
         while not self.stop_flag:
             self.has_start = True
@@ -229,7 +239,7 @@ class Task(TaskMixin):
         if error:
             logger.error(f"({self.model_name}) Downloader error -> {error}")
         else:
-            print(f"({self.model_name}) Downloader done...")
+            logger.info(f"({self.model_name}) Downloader done...")
 
 
     def _on_writer_done(self, future):
@@ -237,10 +247,8 @@ class Task(TaskMixin):
         import sys
         if error:
             logger.error(f"({self.model_name}) Writer error -> {error}",exc_info=True)
-            # sys.exit(1)
         else:
-            print(f"({self.model_name}) Writer done...")
-            # sys.exit(1)
+            logger.info(f"({self.model_name}) Writer done...")
 
 
 def get_config(config_file):
@@ -280,7 +288,9 @@ class TaskManager:
     def on_task_done(self, future):
         t:Task = future.result()
         t =  self.task_map.pop(t.model_name)
+        print(f"({t.model_name}) task done...")
         del t
+
 
 if __name__ == "__main__":
     config_file = "./config.json"

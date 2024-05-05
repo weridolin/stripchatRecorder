@@ -14,6 +14,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/grafov/m3u8"
@@ -99,7 +100,7 @@ type Task struct {
 	// NewLiveStreamEvent     chan bool
 	IsDownloaderStart bool
 	IsFileWriterStart bool
-	DataMap           map[string][]byte
+	DataMap           sync.Map
 }
 
 func NewTask(config Config, modelName string, taskMap map[string]*Task, notifyMessageChan chan<- NotifyMessage) *Task {
@@ -120,7 +121,7 @@ func NewTask(config Config, modelName string, taskMap map[string]*Task, notifyMe
 		// NewLiveStreamEvent: make(chan bool),
 		IsDownloaderStart: false,
 		IsFileWriterStart: false,
-		DataMap:           make(map[string][]byte),
+		DataMap:           sync.Map{},
 	}
 }
 
@@ -235,7 +236,7 @@ func (t *Task) GetPlayList() error {
 				// part file is not exist in PartToDownload and PartDownFinished,add to PartToDownload
 				if !Contains(t.PartToDownload, segment.URI) && !Contains(t.PartDownFinished, segment.URI) {
 					t.PartToDownload = append(t.PartToDownload, segment.URI)
-					log.Printf("(%s) add new segment to PartToDownload list: %s,current task data map %v", t.ModelName, segment.URI, len(t.DataMap))
+					log.Printf("(%s) add new segment to PartToDownload list: %s", t.ModelName, segment.URI)
 					continue
 				}
 			}
@@ -253,7 +254,7 @@ func (t *Task) FileWriter(ctx context.Context) {
 	defer file.Close()
 	// wait until t.DataMap is not empty and t.CurrentSegmentSequence is not -1
 WAIT:
-	if len(t.DataMap) == 0 || t.CurrentSegmentSequence == -1 {
+	if t.CurrentSegmentSequence == -1 {
 		time.Sleep(1 * time.Second)
 		goto WAIT
 	}
@@ -263,46 +264,71 @@ WAIT:
 		select {
 		case <-ctx.Done():
 			log.Printf("(%s) task stop write file ... maybe model is offline", t.ModelName)
+			// if dataMap is not empty,write data to file
+			minKey := 0
+			maxKey := 0
+			t.DataMap.Range(func(k, v interface{}) bool {
+				kInt, _ := strconv.Atoi(k.(string))
+				if kInt < minKey {
+					minKey = kInt
+				}
+				if kInt > maxKey {
+					maxKey = kInt
+				}
+				return true
+			})
+			for i := minKey; i <= maxKey; i++ {
+				key := fmt.Sprintf("%d", i)
+				if data, ok := t.DataMap.Load(key); ok {
+					log.Printf("(%s) write data to file, sequence -> %s", t.ModelName, key)
+					file.Write(data.([]byte))
+					t.DataMap.Delete(key)
+				}
+			}
 			t.IsFileWriterStart = false
 			return
 		default:
 			key := fmt.Sprintf("%d", startIndex)
-			fmt.Println("t.DataMap:", key, startIndex, t.CurrentSegmentSequence)
-			if data, ok := t.DataMap[key]; ok {
+			// fmt.Println("t.DataMap:", key, startIndex, t.CurrentSegmentSequence)
+			if data, ok := t.DataMap.Load(key); ok {
 				log.Printf("(%s) write data to file, sequence -> %s", t.ModelName, key)
-				file.Write(data)
-				delete(t.DataMap, key)
+				file.Write(data.([]byte))
+				// delete(t.DataMap, key)
+				t.DataMap.Delete(key)
 				startIndex++
 			} else {
-				//wait 30s
-				time.Sleep(10 * time.Second)
-			LOOP:
-				if data, ok := t.DataMap[key]; ok {
+				//wait 5s
+				time.Sleep(5 * time.Second)
+				if data, ok := t.DataMap.Load(key); ok {
 					log.Printf("(%s) write data to file, sequence -> %s", t.ModelName, key)
-					file.Write(data)
-					delete(t.DataMap, key)
-					// remove data that sequence smaller than startIndex
-					for k, _ := range t.DataMap {
-						if kInt, _ := strconv.Atoi(k); kInt < startIndex {
-							delete(t.DataMap, k)
-						}
-					}
+					file.Write(data.([]byte))
+					// delete(t.DataMap, key)
+					t.DataMap.Delete(key)
 					startIndex++
 				} else {
+					log.Printf("(%s) ignore data from map, sequence -> %v", t.ModelName, startIndex)
 					startIndex++
-					goto LOOP
 				}
-				// else {
-				// 	// get mini sequence from t.DataMap by key
-				// 	// miniSequence := 100000
-				// 	// for k, _ := range t.DataMap {
-				// 	// 	if kInt, _ := strconv.Atoi(k); kInt < miniSequence {
-				// 	// 		miniSequence = kInt
-				// 	// 	}
-				// 	// }
-				// 	// startIndex = miniSequence
-				// 	continue
-				// }
+				// LOOP:
+				// 	log.Printf("(%s) wait data from map, sequence -> %v", t.ModelName, startIndex)
+				// 	if data, ok := t.DataMap.Load(key); ok {
+				// 		log.Printf("(%s) write data to file, sequence -> %s", t.ModelName, key)
+				// 		file.Write(data.([]byte))
+				// 		// delete(t.DataMap, key)
+				// 		t.DataMap.Delete(key)
+				// 		// remove data that sequence smaller than startIndex
+				// 		t.DataMap.Range(func(k, v interface{}) bool {
+				// 			if kInt, _ := strconv.Atoi(k.(string)); kInt < startIndex {
+				// 				t.DataMap.Delete(k)
+				// 			}
+				// 			return true
+				// 		})
+				// 		startIndex++
+				// 	} else {
+				// 		log.Printf("(%s) ignore data from map, sequence -> %v", t.ModelName, startIndex)
+				// 		startIndex++
+				// 		goto LOOP
+				// 	}
 			}
 		}
 	}
@@ -331,7 +357,8 @@ func (t *Task) DownloadPartFile(PartUrl string, ExtXMap string) bool {
 			} else {
 				// add to map
 				log.Printf("(%s) Download part file success, uri %s,sequence -> %s ", t.ModelName, PartUrl, partSequence)
-				t.DataMap[partSequence] = data
+				// t.DataMap[partSequence] = data
+				t.DataMap.Store(partSequence, data)
 			}
 		}
 	}
