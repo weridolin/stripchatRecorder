@@ -21,6 +21,39 @@ import (
 	"github.com/jordan-wright/email"
 )
 
+/*******  MAP ********/
+
+func GetSyncMapLen(m *sync.Map) int {
+	len := 0
+	m.Range(func(_, _ interface{}) bool {
+		len++
+		return true
+	})
+	return len
+}
+
+func GetMaxKey(m *sync.Map) int {
+	maxKey := 0
+	m.Range(func(k, _ interface{}) bool {
+		if kInt, _ := strconv.Atoi(k.(string)); kInt > maxKey {
+			maxKey = kInt
+		}
+		return true
+	})
+	return maxKey
+}
+
+func GetMinKey(m *sync.Map) int {
+	minKey := GetMaxKey(m)
+	m.Range(func(k, _ interface{}) bool {
+		if kInt, _ := strconv.Atoi(k.(string)); kInt < minKey {
+			minKey = kInt
+		}
+		return true
+	})
+	return minKey
+}
+
 type Config struct {
 	Models  []ModelInfo `json:"models"`
 	SaveDir string      `json:"save_dir"`
@@ -263,24 +296,14 @@ WAIT:
 	for {
 		select {
 		case <-ctx.Done():
-			log.Printf("(%s) task stop write file ... maybe model is offline", t.ModelName)
+			log.Printf("(%s) task stop write file ... maybe model is offline,begin to write rest data from dataMap to file", t.ModelName)
 			// if dataMap is not empty,write data to file
-			minKey := 0
-			maxKey := 0
-			t.DataMap.Range(func(k, v interface{}) bool {
-				kInt, _ := strconv.Atoi(k.(string))
-				if kInt < minKey {
-					minKey = kInt
-				}
-				if kInt > maxKey {
-					maxKey = kInt
-				}
-				return true
-			})
+			minKey := GetMinKey(&t.DataMap)
+			maxKey := GetMaxKey(&t.DataMap)
 			for i := minKey; i <= maxKey; i++ {
 				key := fmt.Sprintf("%d", i)
 				if data, ok := t.DataMap.Load(key); ok {
-					log.Printf("(%s) write data to file, sequence -> %s", t.ModelName, key)
+					log.Printf("(%s) write data to file %s, sequence -> %s", t.ModelName, t.CurrentSaveFilePath, key)
 					file.Write(data.([]byte))
 					t.DataMap.Delete(key)
 				}
@@ -291,7 +314,7 @@ WAIT:
 			key := fmt.Sprintf("%d", startIndex)
 			// fmt.Println("t.DataMap:", key, startIndex, t.CurrentSegmentSequence)
 			if data, ok := t.DataMap.Load(key); ok {
-				log.Printf("(%s) write data to file, sequence -> %s", t.ModelName, key)
+				log.Printf("(%s) write data to file %s, sequence -> %s", t.ModelName, t.CurrentSaveFilePath, key)
 				file.Write(data.([]byte))
 				// delete(t.DataMap, key)
 				t.DataMap.Delete(key)
@@ -299,36 +322,12 @@ WAIT:
 			} else {
 				//wait 5s
 				time.Sleep(5 * time.Second)
-				if data, ok := t.DataMap.Load(key); ok {
-					log.Printf("(%s) write data to file, sequence -> %s", t.ModelName, key)
-					file.Write(data.([]byte))
-					// delete(t.DataMap, key)
-					t.DataMap.Delete(key)
-					startIndex++
-				} else {
-					log.Printf("(%s) ignore data from map, sequence -> %v", t.ModelName, startIndex)
-					startIndex++
+				// if dataMap element count is more than 20,set startIndex to minKey
+				if GetSyncMapLen(&t.DataMap) > 20 {
+					minKey := GetMinKey(&t.DataMap)
+					log.Printf("(%s) dataMap element count is more than 20, set startIndex:%v to minKey %v", t.ModelName, startIndex, minKey)
+					startIndex = minKey
 				}
-				// LOOP:
-				// 	log.Printf("(%s) wait data from map, sequence -> %v", t.ModelName, startIndex)
-				// 	if data, ok := t.DataMap.Load(key); ok {
-				// 		log.Printf("(%s) write data to file, sequence -> %s", t.ModelName, key)
-				// 		file.Write(data.([]byte))
-				// 		// delete(t.DataMap, key)
-				// 		t.DataMap.Delete(key)
-				// 		// remove data that sequence smaller than startIndex
-				// 		t.DataMap.Range(func(k, v interface{}) bool {
-				// 			if kInt, _ := strconv.Atoi(k.(string)); kInt < startIndex {
-				// 				t.DataMap.Delete(k)
-				// 			}
-				// 			return true
-				// 		})
-				// 		startIndex++
-				// 	} else {
-				// 		log.Printf("(%s) ignore data from map, sequence -> %v", t.ModelName, startIndex)
-				// 		startIndex++
-				// 		goto LOOP
-				// 	}
 			}
 		}
 	}
@@ -571,6 +570,7 @@ func LoadConfig(configFile string) Config {
 }
 
 func main() {
+
 	config := LoadConfig("config.json")
 	// os.Setenv("HTTP_PROXY", config.Proxy.Uri)
 	// os.Setenv("HTTPS_PROXY", config.Proxy.Uri)

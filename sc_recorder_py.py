@@ -62,7 +62,6 @@ class TaskMixin:
             logger.error("Error while checking if model is online", exc_info=True)
             return False,None
 
-
     async def get_play_list(self,m3u8_file):
         try:
             async with aiohttp.ClientSession() as session:
@@ -150,6 +149,7 @@ class TaskMixin:
             if start_sequence in self.data_map.keys():
                 if not self.current_save_path:
                     print(f"({self.model_name}) Save path is not set, wait... -> {start_sequence}")
+                    await asyncio.sleep(5)
                     continue
                 async with aiofiles.open(self.current_save_path, 'ab') as afp:
                     await afp.write(self.data_map[start_sequence])
