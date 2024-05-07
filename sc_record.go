@@ -8,6 +8,7 @@ import (
 	"io/ioutil"
 	"log"
 	"net/http"
+	_ "net/http/pprof"
 	"net/smtp"
 	"os"
 	"path/filepath"
@@ -22,6 +23,54 @@ import (
 )
 
 /*******  MAP ********/
+type TDataMap sync.Map
+
+func (m *TDataMap) Load(key string) (value interface{}, ok bool) {
+	return (*sync.Map)(m).Load(key)
+}
+
+func (m *TDataMap) Store(key string, value interface{}) {
+	(*sync.Map)(m).Store(key, value)
+}
+
+func (m *TDataMap) Length() int {
+	len := 0
+	(*sync.Map)(m).Range(func(_, _ interface{}) bool {
+		len++
+		return true
+	})
+	return len
+}
+
+func (m *TDataMap) Delete(key string) {
+	(*sync.Map)(m).Delete(key)
+}
+
+func (m *TDataMap) Range(f func(key, value interface{}) bool) {
+	(*sync.Map)(m).Range(f)
+}
+
+func (m *TDataMap) GetMaxKey() int {
+	maxKey := 0
+	(*sync.Map)(m).Range(func(k, _ interface{}) bool {
+		if kInt, _ := strconv.Atoi(k.(string)); kInt > maxKey {
+			maxKey = kInt
+		}
+		return true
+	})
+	return maxKey
+}
+
+func (m *TDataMap) GetMinKey() int {
+	minKey := m.GetMaxKey()
+	(*sync.Map)(m).Range(func(k, _ interface{}) bool {
+		if kInt, _ := strconv.Atoi(k.(string)); kInt < minKey {
+			minKey = kInt
+		}
+		return true
+	})
+	return minKey
+}
 
 func GetSyncMapLen(m *sync.Map) int {
 	len := 0
@@ -280,17 +329,21 @@ func (t *Task) GetPlayList() error {
 }
 
 func (t *Task) FileWriter(ctx context.Context) {
-	log.Printf("(%s) task file writer start ...  ", t.ModelName)
+	log.Printf("(%s) task file writer start ...  %s ", t.ModelName, t.CurrentSaveFilePath)
 	t.IsFileWriterStart = true
-	// get data from map by sequence,start from t.CurrentSegmentSequence,if not exist,wait 2min max,else continue
-	file, _ := os.OpenFile(t.CurrentSaveFilePath, os.O_WRONLY|os.O_APPEND|os.O_CREATE, 0666)
-	defer file.Close()
 	// wait until t.DataMap is not empty and t.CurrentSegmentSequence is not -1
 WAIT:
 	if t.CurrentSegmentSequence == -1 {
 		time.Sleep(1 * time.Second)
 		goto WAIT
 	}
+
+	file, err := os.OpenFile(t.CurrentSaveFilePath, os.O_WRONLY|os.O_APPEND|os.O_CREATE, 0666)
+	if err != nil {
+		log.Printf("(%s) Failed to open the file: %v\n %s", t.ModelName, err, t.CurrentSaveFilePath)
+		return
+	}
+	defer file.Close()
 
 	startIndex := t.CurrentSegmentSequence
 	for {
@@ -301,12 +354,19 @@ WAIT:
 			minKey := GetMinKey(&t.DataMap)
 			maxKey := GetMaxKey(&t.DataMap)
 			for i := minKey; i <= maxKey; i++ {
+				// get data from map by sequence,start from t.CurrentSegmentSequence,if not exist,wait 2min max,else continue
+				// file, err := os.OpenFile(t.CurrentSaveFilePath, os.O_WRONLY|os.O_APPEND|os.O_CREATE, 0666)
+				// if err != nil {
+				// 	log.Printf("(%s) Failed to open the file: %v\n %s", t.ModelName, err, t.CurrentSaveFilePath)
+				// 	return
+				// }
 				key := fmt.Sprintf("%d", i)
 				if data, ok := t.DataMap.Load(key); ok {
 					log.Printf("(%s) write data to file %s, sequence -> %s", t.ModelName, t.CurrentSaveFilePath, key)
 					file.Write(data.([]byte))
 					t.DataMap.Delete(key)
 				}
+				// file.Close()
 			}
 			t.IsFileWriterStart = false
 			return
@@ -314,11 +374,20 @@ WAIT:
 			key := fmt.Sprintf("%d", startIndex)
 			// fmt.Println("t.DataMap:", key, startIndex, t.CurrentSegmentSequence)
 			if data, ok := t.DataMap.Load(key); ok {
+				// file, err := os.OpenFile(t.CurrentSaveFilePath, os.O_WRONLY|os.O_APPEND|os.O_CREATE, 0666)
+				// if err != nil {
+				// 	log.Printf("(%s) Failed to open the file: %v\n %s", t.ModelName, err, t.CurrentSaveFilePath)
+				// 	return
+				// }
 				log.Printf("(%s) write data to file %s, sequence -> %s", t.ModelName, t.CurrentSaveFilePath, key)
-				file.Write(data.([]byte))
+				_, err = file.Write(data.([]byte))
+				if err != nil {
+					log.Printf("(%s) write data to file failed, error: %s", t.ModelName, err)
+				}
 				// delete(t.DataMap, key)
 				t.DataMap.Delete(key)
 				startIndex++
+				// file.Close()
 			} else {
 				//wait 5s
 				time.Sleep(5 * time.Second)
@@ -356,7 +425,6 @@ func (t *Task) DownloadPartFile(PartUrl string, ExtXMap string) bool {
 			} else {
 				// add to map
 				log.Printf("(%s) Download part file success, uri %s,sequence -> %s ", t.ModelName, PartUrl, partSequence)
-				// t.DataMap[partSequence] = data
 				t.DataMap.Store(partSequence, data)
 			}
 		}
@@ -401,8 +469,6 @@ func (t *Task) Downloader(ctx context.Context) {
 		}
 		file.Close()
 	}
-	file, _ := os.OpenFile(t.CurrentSaveFilePath, os.O_WRONLY|os.O_APPEND|os.O_CREATE, 0666)
-	defer file.Close()
 
 	// download init file first
 	log.Printf("(%s) is Online . start task,begin downloading init file", t.ModelName)
@@ -412,7 +478,9 @@ func (t *Task) Downloader(ctx context.Context) {
 		return
 	} else {
 		data, _ := ioutil.ReadAll(resp.Body)
+		file, _ := os.OpenFile(t.CurrentSaveFilePath, os.O_WRONLY|os.O_APPEND|os.O_CREATE, 0666)
 		file.Write(data)
+		file.Close() // loop , don't user defer
 		for {
 			select {
 			case <-ctx.Done():
@@ -424,17 +492,6 @@ func (t *Task) Downloader(ctx context.Context) {
 					Type:      "down_finish",
 				}
 				return
-			// case <-t.NewLiveStreamEvent:
-			// 	t.PartDownFinished = []string{}
-			// 	t.PartToDownload = []string{}
-			// 	t.CurrentSegmentSequence = 0
-			// 	t.NotifyMessageChan <- NotifyMessage{
-			// 		ModelName: t.ModelName,
-			// 		Message:   "model live stream down finish",
-			// 		SavePath:  t.CurrentSaveFilePath,
-			// 		Type:      "down_finish",
-			// 	}
-			// 	goto RESTART
 			default:
 				if len(t.PartToDownload) == 0 {
 					// time.Sleep(2 * time.Second)
@@ -570,8 +627,12 @@ func LoadConfig(configFile string) Config {
 }
 
 func main() {
+	go func() {
+		log.Println(http.ListenAndServe(":6060", nil))
+	}()
 
 	config := LoadConfig("config.json")
+
 	// os.Setenv("HTTP_PROXY", config.Proxy.Uri)
 	// os.Setenv("HTTPS_PROXY", config.Proxy.Uri)
 	// CamInfoUri := "https://stripchat.com/api/front/v2/models/username/selina530/cam"

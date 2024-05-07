@@ -17,6 +17,10 @@ fh = logging.FileHandler("./err_record.log", encoding="utf-8")
 logger.addHandler(sh)
 logger.addHandler(fh)
 
+header = {
+    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/58.0.3029.110 Safari/537.3'
+}
+
 class FlagNotSameError(Exception):
     pass
 
@@ -43,7 +47,7 @@ class TaskMixin:
 
     async def is_online(self,model_name):
         try:
-            async with aiohttp.ClientSession(trust_env=True) as session:
+            async with aiohttp.ClientSession(trust_env=True,headers=header) as session:
                 async with session.get(f'https://stripchat.com/api/front/v2/models/username/{model_name}/cam') as resp:
                     resp = await resp.json()
             m3u8_file = None
@@ -64,7 +68,7 @@ class TaskMixin:
 
     async def get_play_list(self,m3u8_file):
         try:
-            async with aiohttp.ClientSession() as session:
+            async with aiohttp.ClientSession(trust_env=True,headers=header) as session:
                 async with session.get(m3u8_file) as resp:
                     m3u8_obj = m3u8.loads(await resp.text())
                     if m3u8_obj.media_sequence > self.current_segment_sequence:
@@ -96,7 +100,7 @@ class TaskMixin:
             logger.error(f"({self.model_name}) Can't get sequence from part uri -> {part_uri}")
             return
         try:
-            async with aiohttp.ClientSession() as session:
+            async with aiohttp.ClientSession(trust_env=True,headers=header) as session:
                 async with session.get(part_uri) as resp:
                     if resp.status == 200:
                         self.data_map[sequence] = await resp.read()
@@ -118,7 +122,7 @@ class TaskMixin:
                 ## 下载init文件
                 self.current_save_path = os.path.join(self.save_dir,self.ext_x_map.rsplit('/')[-1])
                 if not os.path.exists(self.current_save_path):
-                    async with aiohttp.ClientSession() as session:
+                    async with aiohttp.ClientSession(trust_env=True,headers=header) as session:
                         async with session.get(self.ext_x_map) as resp:
                             if resp.status == 200:
                                 print(f"({self.model_name}) Downloading init file {self.ext_x_map} to {self.current_save_path} success...") 
