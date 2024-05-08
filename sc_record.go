@@ -400,6 +400,7 @@ WAIT:
 
 func (t *Task) DownloadPartFile(PartUrl string, ExtXMap string) bool {
 	// 1. down part file
+	fmt.Println(">>>>>>>>>>", t.PartToDownload, t.PartDownFinished)
 	log.Printf("(%s) Download part file, uri %s", t.ModelName, PartUrl)
 	resp, err := http.Get(PartUrl)
 	if err != nil {
@@ -492,8 +493,8 @@ func (t *Task) Downloader(ctx context.Context) {
 					// time.Sleep(2 * time.Second)
 					continue
 				} else {
+					// partUri := t.PartToDownload[0]
 					partUri := t.PartToDownload[0]
-					fmt.Println(" -> partUri:", partUri)
 					if partUri != "" && t.ExtXMap != "" {
 						go t.DownloadPartFile(partUri, t.ExtXMap)
 					}
