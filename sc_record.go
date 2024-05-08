@@ -72,36 +72,36 @@ func (m *TDataMap) GetMinKey() int {
 	return minKey
 }
 
-func GetSyncMapLen(m *sync.Map) int {
-	len := 0
-	m.Range(func(_, _ interface{}) bool {
-		len++
-		return true
-	})
-	return len
-}
+// func GetSyncMapLen(m *sync.Map) int {
+// 	len := 0
+// 	m.Range(func(_, _ interface{}) bool {
+// 		len++
+// 		return true
+// 	})
+// 	return len
+// }
 
-func GetMaxKey(m *sync.Map) int {
-	maxKey := 0
-	m.Range(func(k, _ interface{}) bool {
-		if kInt, _ := strconv.Atoi(k.(string)); kInt > maxKey {
-			maxKey = kInt
-		}
-		return true
-	})
-	return maxKey
-}
+// func GetMaxKey(m *sync.Map) int {
+// 	maxKey := 0
+// 	m.Range(func(k, _ interface{}) bool {
+// 		if kInt, _ := strconv.Atoi(k.(string)); kInt > maxKey {
+// 			maxKey = kInt
+// 		}
+// 		return true
+// 	})
+// 	return maxKey
+// }
 
-func GetMinKey(m *sync.Map) int {
-	minKey := GetMaxKey(m)
-	m.Range(func(k, _ interface{}) bool {
-		if kInt, _ := strconv.Atoi(k.(string)); kInt < minKey {
-			minKey = kInt
-		}
-		return true
-	})
-	return minKey
-}
+// func GetMinKey(m *sync.Map) int {
+// 	minKey := GetMaxKey(m)
+// 	m.Range(func(k, _ interface{}) bool {
+// 		if kInt, _ := strconv.Atoi(k.(string)); kInt < minKey {
+// 			minKey = kInt
+// 		}
+// 		return true
+// 	})
+// 	return minKey
+// }
 
 type Config struct {
 	Models  []ModelInfo `json:"models"`
@@ -182,7 +182,7 @@ type Task struct {
 	// NewLiveStreamEvent     chan bool
 	IsDownloaderStart bool
 	IsFileWriterStart bool
-	DataMap           sync.Map
+	DataMap           TDataMap
 	ListOpLock        sync.Mutex
 }
 
@@ -204,7 +204,7 @@ func NewTask(config Config, modelName string, taskMap map[string]*Task, notifyMe
 		// NewLiveStreamEvent: make(chan bool),
 		IsDownloaderStart: false,
 		IsFileWriterStart: false,
-		DataMap:           sync.Map{},
+		DataMap:           TDataMap{},
 		ListOpLock:        sync.Mutex{},
 	}
 }
@@ -355,8 +355,8 @@ WAIT:
 		case <-ctx.Done():
 			log.Printf("(%s) task stop write file ... maybe model is offline,begin to write rest data from dataMap to file", t.ModelName)
 			// if dataMap is not empty,write data to file
-			minKey := GetMinKey(&t.DataMap)
-			maxKey := GetMaxKey(&t.DataMap)
+			minKey := t.DataMap.GetMinKey()
+			maxKey := t.DataMap.GetMaxKey()
 			for i := minKey; i <= maxKey; i++ {
 				// get data from map by sequence,start from t.CurrentSegmentSequence,if not exist,wait 2min max,else continue
 				// file, err := os.OpenFile(t.CurrentSaveFilePath, os.O_WRONLY|os.O_APPEND|os.O_CREATE, 0666)
@@ -391,8 +391,8 @@ WAIT:
 				//wait 5s
 				time.Sleep(5 * time.Second)
 				// if dataMap element count is more than 20,set startIndex to minKey
-				if GetSyncMapLen(&t.DataMap) > 20 {
-					minKey := GetMinKey(&t.DataMap)
+				if t.DataMap.Length() > 20 {
+					minKey := t.DataMap.GetMinKey()
 					log.Printf("(%s) dataMap element count is more than 20, set startIndex:%v to minKey %v", t.ModelName, startIndex, minKey)
 					startIndex = minKey
 				}
