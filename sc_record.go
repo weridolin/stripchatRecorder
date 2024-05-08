@@ -183,6 +183,7 @@ type Task struct {
 	IsDownloaderStart bool
 	IsFileWriterStart bool
 	DataMap           sync.Map
+	ListOpLock        sync.Mutex
 }
 
 func NewTask(config Config, modelName string, taskMap map[string]*Task, notifyMessageChan chan<- NotifyMessage) *Task {
@@ -204,6 +205,7 @@ func NewTask(config Config, modelName string, taskMap map[string]*Task, notifyMe
 		IsDownloaderStart: false,
 		IsFileWriterStart: false,
 		DataMap:           sync.Map{},
+		ListOpLock:        sync.Mutex{},
 	}
 }
 
@@ -317,7 +319,9 @@ func (t *Task) GetPlayList() error {
 				}
 				// part file is not exist in PartToDownload and PartDownFinished,add to PartToDownload
 				if !Contains(t.PartToDownload, segment.URI) && !Contains(t.PartDownFinished, segment.URI) {
+					t.ListOpLock.Lock()
 					t.PartToDownload = append(t.PartToDownload, segment.URI)
+					t.ListOpLock.Unlock()
 					log.Printf("(%s) add new segment to PartToDownload list: %s", t.ModelName, segment.URI)
 					continue
 				}
@@ -400,7 +404,6 @@ WAIT:
 
 func (t *Task) DownloadPartFile(PartUrl string, ExtXMap string) bool {
 	// 1. down part file
-	fmt.Println(">>>>>>>>>>", t.PartToDownload, t.PartDownFinished)
 	log.Printf("(%s) Download part file, uri %s", t.ModelName, PartUrl)
 	resp, err := http.Get(PartUrl)
 	if err != nil {
@@ -494,6 +497,7 @@ func (t *Task) Downloader(ctx context.Context) {
 					continue
 				} else {
 					// partUri := t.PartToDownload[0]
+					t.ListOpLock.Lock()
 					partUri := t.PartToDownload[0]
 					if partUri != "" && t.ExtXMap != "" {
 						go t.DownloadPartFile(partUri, t.ExtXMap)
@@ -507,6 +511,7 @@ func (t *Task) Downloader(ctx context.Context) {
 					if len(t.PartDownFinished) >= 100 {
 						t.PartDownFinished = t.PartDownFinished[len(t.PartDownFinished)-100:]
 					}
+					t.ListOpLock.Unlock()
 				}
 			}
 		}
