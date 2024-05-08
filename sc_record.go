@@ -374,11 +374,6 @@ WAIT:
 			key := fmt.Sprintf("%d", startIndex)
 			// fmt.Println("t.DataMap:", key, startIndex, t.CurrentSegmentSequence)
 			if data, ok := t.DataMap.Load(key); ok {
-				// file, err := os.OpenFile(t.CurrentSaveFilePath, os.O_WRONLY|os.O_APPEND|os.O_CREATE, 0666)
-				// if err != nil {
-				// 	log.Printf("(%s) Failed to open the file: %v\n %s", t.ModelName, err, t.CurrentSaveFilePath)
-				// 	return
-				// }
 				log.Printf("(%s) write data to file %s, sequence -> %s", t.ModelName, t.CurrentSaveFilePath, key)
 				_, err = file.Write(data.([]byte))
 				if err != nil {
@@ -405,7 +400,7 @@ WAIT:
 
 func (t *Task) DownloadPartFile(PartUrl string, ExtXMap string) bool {
 	// 1. down part file
-	log.Printf("(%s) Download part file, uri %s", t.ModelName, PartUrl)
+	// log.Printf("(%s) Download part file, uri %s", t.ModelName, PartUrl)
 	resp, err := http.Get(PartUrl)
 	if err != nil {
 		log.Printf("(%s) Download part file failed, error: %s. uri %s", t.ModelName, err, PartUrl)
@@ -499,7 +494,9 @@ func (t *Task) Downloader(ctx context.Context) {
 				} else {
 					partUri := t.PartToDownload[0]
 					// fmt.Println("partUri:", partUri)
-					go t.DownloadPartFile(partUri, t.ExtXMap)
+					if partUri != "" && t.ExtXMap != "" {
+						go t.DownloadPartFile(partUri, t.ExtXMap)
+					}
 					if len(t.PartToDownload) == 0 {
 						continue
 					}
