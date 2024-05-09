@@ -72,36 +72,36 @@ func (m *TDataMap) GetMinKey() int {
 	return minKey
 }
 
-// func GetSyncMapLen(m *sync.Map) int {
-// 	len := 0
-// 	m.Range(func(_, _ interface{}) bool {
-// 		len++
-// 		return true
-// 	})
-// 	return len
-// }
+func GetSyncMapLen(m *sync.Map) int {
+	len := 0
+	m.Range(func(_, _ interface{}) bool {
+		len++
+		return true
+	})
+	return len
+}
 
-// func GetMaxKey(m *sync.Map) int {
-// 	maxKey := 0
-// 	m.Range(func(k, _ interface{}) bool {
-// 		if kInt, _ := strconv.Atoi(k.(string)); kInt > maxKey {
-// 			maxKey = kInt
-// 		}
-// 		return true
-// 	})
-// 	return maxKey
-// }
+func GetMaxKey(m *sync.Map) int {
+	maxKey := 0
+	m.Range(func(k, _ interface{}) bool {
+		if kInt, _ := strconv.Atoi(k.(string)); kInt > maxKey {
+			maxKey = kInt
+		}
+		return true
+	})
+	return maxKey
+}
 
-// func GetMinKey(m *sync.Map) int {
-// 	minKey := GetMaxKey(m)
-// 	m.Range(func(k, _ interface{}) bool {
-// 		if kInt, _ := strconv.Atoi(k.(string)); kInt < minKey {
-// 			minKey = kInt
-// 		}
-// 		return true
-// 	})
-// 	return minKey
-// }
+func GetMinKey(m *sync.Map) int {
+	minKey := GetMaxKey(m)
+	m.Range(func(k, _ interface{}) bool {
+		if kInt, _ := strconv.Atoi(k.(string)); kInt < minKey {
+			minKey = kInt
+		}
+		return true
+	})
+	return minKey
+}
 
 type Config struct {
 	Models  []ModelInfo `json:"models"`
@@ -359,11 +359,6 @@ WAIT:
 			maxKey := t.DataMap.GetMaxKey()
 			for i := minKey; i <= maxKey; i++ {
 				// get data from map by sequence,start from t.CurrentSegmentSequence,if not exist,wait 2min max,else continue
-				// file, err := os.OpenFile(t.CurrentSaveFilePath, os.O_WRONLY|os.O_APPEND|os.O_CREATE, 0666)
-				// if err != nil {
-				// 	log.Printf("(%s) Failed to open the file: %v\n %s", t.ModelName, err, t.CurrentSaveFilePath)
-				// 	return
-				// }
 				key := fmt.Sprintf("%d", i)
 				if data, ok := t.DataMap.Load(key); ok {
 					log.Printf("(%s) write data to file %s, sequence -> %s", t.ModelName, t.CurrentSaveFilePath, key)
@@ -403,6 +398,12 @@ WAIT:
 }
 
 func (t *Task) DownloadPartFile(PartUrl string, ExtXMap string) bool {
+	defer func() {
+		if err := recover(); err != nil {
+			log.Printf("(%s) Download part file failed, error: %s. uri %s", t.ModelName, err, PartUrl)
+			return
+		}
+	}()
 	// 1. down part file
 	log.Printf("(%s) Download part file, uri %s", t.ModelName, PartUrl)
 	resp, err := http.Get(PartUrl)
@@ -410,21 +411,23 @@ func (t *Task) DownloadPartFile(PartUrl string, ExtXMap string) bool {
 		log.Printf("(%s) Download part file failed, error: %s. uri %s", t.ModelName, err, PartUrl)
 		return false
 	} else {
-		defer resp.Body.Close()
-		data, _ := ioutil.ReadAll(resp.Body)
-		if resp.StatusCode != 200 {
-			log.Printf("(%s) Download part file failed, error: %s. uri %s statusCode:%v \n response %s", t.ModelName, err, PartUrl, resp.StatusCode, data)
-			return false
-		} else {
-			// get part squenence
-			partSequence := GetPartSequence(PartUrl)
-			if partSequence == "" {
-				log.Printf("(%s) Get part sequence failed, uri %s", t.ModelName, PartUrl)
+		if resp != nil {
+			defer resp.Body.Close()
+			data, _ := ioutil.ReadAll(resp.Body)
+			if resp.StatusCode != 200 {
+				log.Printf("(%s) Download part file failed, error: %s. uri %s statusCode:%v \n response %s", t.ModelName, err, PartUrl, resp.StatusCode, data)
 				return false
 			} else {
-				// add to map
-				log.Printf("(%s) Download part file success, uri %s,sequence -> %s ", t.ModelName, PartUrl, partSequence)
-				t.DataMap.Store(partSequence, data)
+				// get part squenence
+				partSequence := GetPartSequence(PartUrl)
+				if partSequence == "" {
+					log.Printf("(%s) Get part sequence failed, uri %s", t.ModelName, PartUrl)
+					return false
+				} else {
+					// add to map
+					log.Printf("(%s) Download part file success, uri %s,sequence -> %s ", t.ModelName, PartUrl, partSequence)
+					t.DataMap.Store(partSequence, data)
+				}
 			}
 		}
 	}
@@ -630,9 +633,9 @@ func LoadConfig(configFile string) Config {
 }
 
 func main() {
-	go func() {
-		log.Println(http.ListenAndServe(":6060", nil))
-	}()
+	// go func() {
+	// 	log.Println(http.ListenAndServe(":6060", nil))
+	// }()
 
 	config := LoadConfig("config.json")
 
