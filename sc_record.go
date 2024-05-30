@@ -156,13 +156,16 @@ type DownloaderImpl interface {
 }
 
 func Contains(s []string, e string) bool {
+	if err := recover(); err != nil {
+		log.Println("Contains panic:", err)
+		return false
+	}
 	for _, a := range s {
 		if a == e {
 			return true
 		}
 	}
 	return false
-
 }
 
 type Task struct {
@@ -475,47 +478,50 @@ func (t *Task) Downloader(ctx context.Context) {
 	// download init file first
 	log.Printf("(%s) is Online . start task,begin downloading init file", t.ModelName)
 	resp, err := http.Get(t.ExtXMap)
+
 	if err != nil {
 		log.Printf("(%s) Download init file failed, error: %s. uri %s", t.ModelName, err, t.ExtXMap)
 		return
-	} else {
-		data, _ := ioutil.ReadAll(resp.Body)
-		file, _ := os.OpenFile(t.CurrentSaveFilePath, os.O_WRONLY|os.O_APPEND|os.O_CREATE, 0666)
-		file.Write(data)
-		file.Close() // loop , don't user defer
-		for {
-			select {
-			case <-ctx.Done():
-				log.Printf("(%s) task stop download ... maybe model is offline", t.ModelName)
-				t.NotifyMessageChan <- NotifyMessage{
-					ModelName: t.ModelName,
-					Message:   "model live stream down finish",
-					SavePath:  t.CurrentSaveFilePath,
-					Type:      "down_finish",
+	}
+	defer resp.Body.Close()
+
+	data, _ := ioutil.ReadAll(resp.Body)
+	file, _ := os.OpenFile(t.CurrentSaveFilePath, os.O_WRONLY|os.O_APPEND|os.O_CREATE, 0666)
+	file.Write(data)
+	file.Close() // loop , don't user defer
+
+	for {
+		select {
+		case <-ctx.Done():
+			log.Printf("(%s) task stop download ... maybe model is offline", t.ModelName)
+			t.NotifyMessageChan <- NotifyMessage{
+				ModelName: t.ModelName,
+				Message:   "model live stream down finish",
+				SavePath:  t.CurrentSaveFilePath,
+				Type:      "down_finish",
+			}
+			return
+		default:
+			if len(t.PartToDownload) == 0 {
+				// time.Sleep(2 * time.Second)
+				continue
+			} else {
+				// partUri := t.PartToDownload[0]
+				t.ListOpLock.Lock()
+				partUri := t.PartToDownload[0]
+				if partUri != "" && t.ExtXMap != "" {
+					go t.DownloadPartFile(partUri, t.ExtXMap)
 				}
-				return
-			default:
 				if len(t.PartToDownload) == 0 {
-					// time.Sleep(2 * time.Second)
 					continue
-				} else {
-					// partUri := t.PartToDownload[0]
-					t.ListOpLock.Lock()
-					partUri := t.PartToDownload[0]
-					if partUri != "" && t.ExtXMap != "" {
-						go t.DownloadPartFile(partUri, t.ExtXMap)
-					}
-					if len(t.PartToDownload) == 0 {
-						continue
-					}
-					t.PartToDownload = t.PartToDownload[1:]
-					t.PartDownFinished = append(t.PartDownFinished, partUri)
-					// partDownFinished list only save current 100 records
-					if len(t.PartDownFinished) >= 100 {
-						t.PartDownFinished = t.PartDownFinished[len(t.PartDownFinished)-100:]
-					}
-					t.ListOpLock.Unlock()
 				}
+				t.PartToDownload = t.PartToDownload[1:]
+				t.PartDownFinished = append(t.PartDownFinished, partUri)
+				// partDownFinished list only save current 100 records
+				if len(t.PartDownFinished) >= 100 {
+					t.PartDownFinished = t.PartDownFinished[len(t.PartDownFinished)-100:]
+				}
+				t.ListOpLock.Unlock()
 			}
 		}
 	}
