@@ -261,13 +261,19 @@ func (t *Task) IsOnline() (bool, string) {
 			return false, ""
 		}
 		var camInfo GetCamInfoRespBrief
+		// fmt.Println("body:", string(body))
 		err = json.Unmarshal(body, &camInfo)
 		if err != nil {
-			log.Println("Unmarshal cam info failed, error:", err)
+			log.Printf("model %s Unmarshal cam info failed, error: %s", t.ModelName, err)
 			return false, ""
 		}
+		fmt.Printf("model %s,cam info: %s", t.ModelName, camInfo)
 		if !camInfo.Cam.IsCamAvailable || camInfo.Cam.StreamName == "" {
 			return false, ""
+		}
+		if camInfo.Cam.ViewServers.FlashphonerHls == "" {
+			log.Println("model", t.ModelName, "flashphoner-hls is empty", "set default value hls-19")
+			camInfo.Cam.ViewServers.FlashphonerHls = "hls-19"
 		}
 		// /f'https://b-{resp["cam"]["viewServers"]["flashphoner-hls"]}.doppiocdn.com/hls/{resp["cam"]["streamName"]}/{resp["cam"]["streamName"]}.m3u8'
 		m3u8File := fmt.Sprintf("https://b-%s.doppiocdn.com/hls/%s/%s.m3u8", camInfo.Cam.ViewServers.FlashphonerHls, camInfo.Cam.StreamName, camInfo.Cam.StreamName)
