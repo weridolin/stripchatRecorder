@@ -2,109 +2,94 @@ import cv2
 from moviepy.editor import VideoFileClip
 import os,subprocess,re,sys
 
-def remove_black_frames(input_video, output_video):
-    cap = cv2.VideoCapture(input_video)
-    if not cap.isOpened():
-        print("Error: Unable to open input video")
-        return
-    
-    frame_width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-    frame_height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-    fps = cap.get(cv2.CAP_PROP_FPS)
-    total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
 
-    fourcc = cv2.VideoWriter_fourcc(*'mp4v')
-    out = cv2.VideoWriter(output_video, fourcc, fps, (frame_width, frame_height))
 
-    black_frame_threshold = 5  # 定义黑屏帧阈值
 
-    while cap.isOpened():
-        ret, frame = cap.read()
-        if not ret:
-            break
-        
-        # 检测黑屏帧
-        if is_black_frame(frame):
+dir = r"E:\records"
+
+def merge():
+    for model in os.listdir(dir):
+        if model!="after":
+            for date in os.listdir(os.path.join(dir, model)):
+                output_file = f"./{date}" + ".mp4"
+                date_dir = os.path.join(dir, model, date)
+                print("deal with: ", date_dir)
+                file_name_list = os.listdir(date_dir)
+                ## sort by create time
+                file_name_list.sort(key=lambda x: os.path.getctime(os.path.join(date_dir, x)))
+                print(file_name_list)
+                input_args = ""
+                for file in file_name_list:
+                    path = os.path.join(date_dir, file)
+                    input_args += f"-i {path} "
+                command = f"ffmpeg {input_args} -filter_complex concat=n={len(file_name_list)}:v=1:a=0 -f mp4 {output_file}"
+                print(command)
+                p = subprocess.run(command, shell=True)
+                p.wait()
+                return
+            
+
+def merge1():
+    from moviepy.editor import VideoFileClip
+    from moviepy.video.io.ffmpeg_tools import ffmpeg_concat
+
+    # 分段加载和处理视频
+    def process_video(video_path):
+        return VideoFileClip(video_path)
+
+    # 视频文件列表
+    for model in os.listdir(dir):
+        if model!="after":
+            for date in os.listdir(os.path.join(dir, model)):
+                output_file = f"./{date}" + ".mp4"
+                date_dir = os.path.join(dir, model, date)
+                print("deal with: ", date_dir)
+                file_name_list = os.listdir(date_dir)
+
+                # 临时保存的中间文件列表
+                temp_files = []
+  
+
+
+                # 逐个处理并保存中间结果
+                # for idx, video_file in enumerate(file_name_list):
+                #     path = os.path.join(date_dir, video_file)
+                #     clip = process_video(path)
+                #     temp_filename = os.path.join(date_dir,f"temp_{idx}.mp4") 
+                #     clip.write_videofile(temp_filename, codec="libx264")
+                #     temp_files.append(temp_filename)
+                #     clip.close()
+
+                # # 合并中间结果文件
+                # output_file = "merged_video.mp4"
+                # ffmpeg_concat(temp_files, output_file, vcodec="libx264")
+
+                # # 删除临时文件
+                # import os
+                # for temp_file in temp_files:
+                #     os.remove(temp_file)
+
+                # print(f"合并完成，输出文件: {output_file}")
+                # break
+
+
+
+for root, dirs, files in os.walk(dir):
+    for file in files:
+        if "_after.mp4" in file:
+            print("skip -------------------------------------------> : ", file)
             continue
+        name, ext = os.path.splitext(file)
+        input_video = os.path.join(root, file)
+        output_video = os.path.join(root, name + "_after.mp4")
+        if os.path.exists(output_video):
+            print("skip -------------------------------------------> : ", input_video)
+            continue
+        print("deal with: ", input_video, output_video)
+        ffmpeg_exec = os.path.join(os.path.dirname(__file__), "ffmpeg.exe")
+        cmd = f"""{ffmpeg_exec} -i {input_video} -vf "blackframe=99:32" -vf "trim=start_frame=100" {output_video}"""
+        p = subprocess.Popen(cmd, shell=True, stdout=sys.stdout, stderr=sys.stderr)
+        p.wait()
+        os.remove(input_video)   
 
-        out.write(frame)
-
-    cap.release()
-    out.release()
-
-
-def is_black_frame(frame, threshold=10):
-    # 计算帧中像素值的平均值
-    avg_pixel_value = frame.mean()
-    # 如果平均值小于阈值，认为是黑屏帧
-    return avg_pixel_value < threshold
-
-
-# remove_black_frames(r"E:\records\CNNANAoo\2024-05-07\69756356_init_SUZUtRNC9AaHEAMD.mp4", r"E:\records\CNNANAoo\2024-05-07\69756356_init_SUZUtRNC9AaHEAMD_after.mp4")
-
-dir = "E:/records/"
-
-
-
-# def deal_by_ffmpeg(input_video, output_video):
-#     import ffmpeg
-#     # 定义过滤器链
-#     blackframe_filter = "blackframe=99:32"
-#     trim_filter = "trim=start_frame=100"
-
-#     # 构建 ffmpeg 命令
-#     cmd = (
-#         ffmpeg.input(input_video,executable=r"D:\fireFoxDownload\ffmpeg-7.0-essentials_build\ffmpeg-7.0-essentials_build\bin\ffmpeg.exe")
-#         .filter(blackframe_filter)
-#         .filter(trim_filter)
-#         .output(output_video)
-#         .run()
-#     )
-# deal_by_ffmpeg(r"E:\records\CNNANAoo\2024-05-07\69756356_init_SUZUtRNC9AaHEAMD.mp4", r"E:\records\CNNANAoo\2024-05-07\69756356_init_SUZUtRNC9AaHEAMD_after.mp4")
-
-import time
-max_process = os.cpu_count()-2
-processes = []
-import threading
-
-# class Task(threading.Thread):
-
-#     def __init__(self,input_video,output_video):
-#         threading.Thread.__init__(self)
-#         self.input_video = input_video
-#         self.output_video = output_video
-
-#     def run(self):
-#         print("deal with: ", self.input_video, self.output_video)
-#         if os.path.exists(self.output_video):
-#             os.remove(self.output_video)
-#         print("deal with: ", self.input_video, self.output_video)
-#         ffmpeg_exec = os.path.join(os.path.dirname(__file__), "ffmpeg.exe")
-#         cmd = f"""{ffmpeg_exec} -i {self.input_video} -vf "blackframe=99:32" -vf "trim=start_frame=100" {self.output_video}"""
-#         p = subprocess.Popen(cmd, shell=True, stdout=sys.stdout, stderr=sys.stderr)
-#         p.wait()
-#         os.remove(self.input_video)          
-
-# todo_list=[]
-
-# for root, dirs, files in os.walk(dir):
-#     for file in files:
-#         name, ext = os.path.splitext(file)
-#         input_video = os.path.join(root, file)
-#         output_video = os.path.join(root, name + "_after.mp4")
-#         todo_list.append((input_video,output_video))
-
-# while todo_list:
-#     if len(processes) <= max_process:
-#         item = todo_list.pop()
-#         t = Task(item[0],item[1])
-#         t.start()
-#         processes.append(t)
-#         continue
-#     for p in processes:
-#         if not p.is_alive():
-#             processes.remove(p)
-#             break
-#     time.sleep(1)
-
-
+# merge1()

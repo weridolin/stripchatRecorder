@@ -5,16 +5,23 @@
             "type":"model"
         }
     ],
-    "save_dir":"/dir/to/save",
+    "save_dir":"E:/records",
     "notify":{
+        "enable":false,
+        "smtp":"smtp.qq.com",
+        "port":465,
+        "sender":"",
+        "password":"",
+        "receiver":""
+        
+    },
+    "proxy":{
         "enable":true,
-        "type":"email",
-        "email":{
-            "smtp":"email.server.com",
-            "port":465,
-            "user":"",
-            "password":""
-        }
+        "uri":"http://127.0.0.1:10809"
     }
+<<<<<<< HEAD
 
 }
+=======
+}
+>>>>>>> 3593ebf9d8abbf1508c5da3098cbfe81330addff
