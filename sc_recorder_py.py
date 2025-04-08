@@ -52,13 +52,12 @@ class TaskMixin:
                     resp = await resp.json()
             m3u8_file = None
             if 'cam' in resp.keys():
-                if {'isCamAvailable', 'streamName', 'viewServers'} <= resp['cam'].keys():
-                    # streamName is the live mu3u8 stream file name
-                    if 'flashphoner-hls' in resp['cam']['viewServers'].keys() and resp['cam']['isCamAvailable'] and resp['cam']['isCamAvailable']:
-                        m3u8_file = f'https://b-{resp["cam"]["viewServers"]["flashphoner-hls"]}.doppiocdn.com/hls/{resp["cam"]["streamName"]}/{resp["cam"]["streamName"]}.m3u8'
+                if 'isCamAvailable' in resp['cam'].keys() and resp['cam']['isCamAvailable']:
+                    # m3u8File := fmt.Sprintf("https://media-hls.doppiocdn.com/b-%s/%s/%s.m3u8", camInfo.Cam.ViewServers.FlashphonerHls, camInfo.Cam.StreamName, camInfo.Cam.StreamName)
+                    m3u8_file = f'https://media-hls.doppiocdn.com/b-hls-19/{resp["cam"]["streamName"]}/{resp["cam"]["streamName"]}.m3u8'
                         # print(f"model -> {model_name} is online, stream m3u8 file -> {m3u8_file}, steam name -> {resp['cam']['streamName']}")
-                    else:
-                        return False,None
+                else:
+                    return False,None
             if m3u8_file:
                 return m3u8_file, resp['cam']['streamName']
             return False,None
