@@ -276,7 +276,8 @@ func (t *Task) IsOnline() (bool, string) {
 			camInfo.Cam.ViewServers.FlashphonerHls = "hls-19"
 		}
 		// /f'https://b-{resp["cam"]["viewServers"]["flashphoner-hls"]}.doppiocdn.com/hls/{resp["cam"]["streamName"]}/{resp["cam"]["streamName"]}.m3u8'
-		m3u8File := fmt.Sprintf("https://b-%s.doppiocdn.com/hls/%s/%s.m3u8", camInfo.Cam.ViewServers.FlashphonerHls, camInfo.Cam.StreamName, camInfo.Cam.StreamName)
+		// https://media-hls.doppiocdn.com
+		m3u8File := fmt.Sprintf("https://media-hls.doppiocdn.com/b-%s/%s/%s.m3u8", camInfo.Cam.ViewServers.FlashphonerHls, camInfo.Cam.StreamName, camInfo.Cam.StreamName)
 		log.Printf("model %s is  online,Get m3u8 file: %s", t.ModelName, m3u8File)
 		t.OnlineM3u8File = m3u8File
 		return true, m3u8File
@@ -289,6 +290,7 @@ func (t *Task) GetPlayList() error {
 		log.Println("OnlineM3u8File is empty")
 		return fmt.Errorf("OnlineM3u8File is empty")
 	}
+	// fmt.Println(t.OnlineM3u8File)
 	resp, err := http.Get(t.OnlineM3u8File)
 	if err != nil || resp.StatusCode != 200 {
 		// if stream is over,get 404
