@@ -290,7 +290,7 @@ func (t *Task) GetPlayList() error {
 		log.Println("OnlineM3u8File is empty")
 		return fmt.Errorf("OnlineM3u8File is empty")
 	}
-	fmt.Println(t.OnlineM3u8File)
+	// fmt.Println(t.OnlineM3u8File
 	resp, err := http.Get(t.OnlineM3u8File)
 	if err != nil || resp.StatusCode != 200 {
 		// if stream is over,get 404
