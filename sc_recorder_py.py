@@ -12,11 +12,27 @@ import hashlib
 import logging
 import base64
 from typing import List, Dict
-
+import threading
 
 # logger will be configured in TaskManager after reading config
 logger = logging.getLogger('logger')
 
+header = {
+    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/58.0.3029.110 Safari/537.3'
+}
+
+def down_part_url_by_thread(task,url,index):
+    res = requests.get(url,headers=header)
+    if res.status_code == 200:
+        logger.debug(f"down load url {url} success ,index:{index}")
+        task.part_down_finish.update({
+            index:res.content
+        })
+    else:
+        logger.error(f"down load url {url} fail ,index:{index},status code:{res.status_code}")
+        task.part_down_finish.update({
+            index:b""
+        })
 def setup_logger(log_level='DEBUG'):
     """Setup logger with specified level from config"""
     level_map = {
@@ -47,9 +63,6 @@ def setup_logger(log_level='DEBUG'):
     
     return logger
 
-header = {
-    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/58.0.3029.110 Safari/537.3'
-}
 
 
 
@@ -161,12 +174,14 @@ class TaskMixin:
         self.online_mu3u8_uri = None ## 直播流地址
         self.current_segment_sequence = 0 # 当前直播流第几个序列片段
         self.stream_name = None # 当前stream names
-        self.part_to_down = dict() # 等待下载的片段列表 
+        self.part_to_down = list() # 等待下载的片段列表 
         self.part_down_finish = dict() # 正在下载的片段列表
         self.data_map = {} # 存储下载的数据 seq:list[data]
-        self.temp_data_map = {} # 临时存储part0-part2的数据 seq:{part_num:data}
         self.current_save_path = None # 保存路径
         self.decrypt_key_map = {} ## #EXT-X-MOUFLON的解密key
+        self.part_index = 0 # 当前下载的part索引
+    
+
     async def is_online(self,model_name):
         try:
             async with aiohttp.ClientSession(trust_env=True,headers=header) as session:
@@ -189,61 +204,63 @@ class TaskMixin:
 
 
     async def get_play_list(self,m3u8_file):
-        try:
-            async with aiohttp.ClientSession(trust_env=True,headers=header) as session:
-                logger.debug(f"({self.model_name}) get m3u8 file -> {m3u8_file}")
-                async with session.get(m3u8_file) as resp:
-                    res = await resp.text()
-                    ## 获取 pkey 和 psch
-                    psch,pkey = get_psch_pkey_from_m3u8(res)
-                    variant_playlists = extract_variant_playlists(res)
-                    media_uri = variant_playlists.get('480p',variant_playlists.get("source"))
-                    if not psch:
-                        logger.error(f"({self.model_name}) get psch and pkey from m3u8 file failed, m3u8 file -> {m3u8_file}")
-                        raise FlagNotSameError
-                    if not pkey:
-                        logger.error(f"({self.model_name}) get psch and pkey from m3u8 file failed, m3u8 file -> {m3u8_file}")
-                        raise FlagNotSameError 
-                    if not media_uri:
-                        logger.error(f"({self.model_name}) get media uri from m3u8 file failed, m3u8 file -> {m3u8_file}")
-                        raise FlagNotSameError
+        while True:
+            try:
+                async with aiohttp.ClientSession(trust_env=True,headers=header) as session:
+                    logger.debug(f"({self.model_name}) get m3u8 file -> {m3u8_file}")
+                    async with session.get(m3u8_file) as resp:
+                        res = await resp.text()
+                        ## 获取 pkey 和 psch
+                        psch,pkey = get_psch_pkey_from_m3u8(res)
+                        variant_playlists = extract_variant_playlists(res)
+                        media_uri = variant_playlists.get('480p',variant_playlists.get("source"))
+                        if not psch:
+                            logger.error(f"({self.model_name}) get psch and pkey from m3u8 file failed, m3u8 file -> {m3u8_file}")
+                            raise FlagNotSameError
+                        if not pkey:
+                            logger.error(f"({self.model_name}) get psch and pkey from m3u8 file failed, m3u8 file -> {m3u8_file}")
+                            raise FlagNotSameError 
+                        if not media_uri:
+                            logger.error(f"({self.model_name}) get media uri from m3u8 file failed, m3u8 file -> {m3u8_file}")
+                            raise FlagNotSameError
 
-                    logger.debug(f"({self.model_name}) get pkey -> {pkey}")
+                        logger.debug(f"({self.model_name}) get pkey -> {pkey}")
 
-                    if not self.decrypt_key_map.get(pkey):
-                        decrypt_key = await get_decrypt_key(pkey)
-                        self.decrypt_key_map[pkey] = decrypt_key
-                    else:
-                        decrypt_key = self.decrypt_key_map[pkey]
+                        if not self.decrypt_key_map.get(pkey):
+                            decrypt_key = await get_decrypt_key(pkey)
+                            self.decrypt_key_map[pkey] = decrypt_key
+                        else:
+                            decrypt_key = self.decrypt_key_map[pkey]
 
-                    logger.debug(f"({self.model_name}) get decrypt key : {decrypt_key} from pkey -> {pkey}")
+                        logger.debug(f"({self.model_name}) get decrypt key : {decrypt_key} from pkey -> {pkey}")
 
 
-                    media_uri = f"{media_uri}?psch={psch}&pkey={pkey}&playlistType=lowLatency"
-                    logger.debug(f"({self.model_name}) get absolute media uri -> {media_uri}")
+                        media_uri = f"{media_uri}?psch={psch}&pkey={pkey}&playlistType=lowLatency"
+                        logger.debug(f"({self.model_name}) get absolute media uri -> {media_uri}")
+                    
+                    async with session.get(media_uri) as resp:
+                        res = await resp.text()
+                        m3u8_obj = m3u8.loads(res)
+                        self.current_segment_sequence = m3u8_obj.media_sequence
+                        self.ext_x_map = m3u8_obj.segments[0].init_section.uri
 
-                async with session.get(media_uri) as resp:
-                    res = await resp.text()
-                    m3u8_obj = m3u8.loads(res)
-                    self.current_segment_sequence = m3u8_obj.media_sequence
-                    self.ext_x_map = m3u8_obj.segments[0].init_section.uri
-
-                    mouflon_and_parts = extract_mouflon_and_parts(res)
-                    for mouflon, part in mouflon_and_parts:
-                        real_part_url = decode(mouflon,decrypt_key)
-                        real_part_url = f"{part.rsplit('/',1)[0]}/{real_part_url}"
-                        sequence = self._get_sequence(real_part_url)
-                        if sequence not in self.part_to_down:
-                            self.part_to_down[sequence] = []
-                        if real_part_url not in self.part_to_down[sequence]:
-                            self.part_to_down[sequence].append(real_part_url)
-                            logger.debug(f"({self.model_name}) 添加分片链接 -> {real_part_url} 到 sequence -> {sequence}")
-            # return m3u8_obj
-        except Exception as e:
-            logger.error(f"({self.model_name}) get m3u8 file error -> {e}",exc_info=True)
-            self.stop_flag= True    
-            return self
-    
+                        mouflon_and_parts = extract_mouflon_and_parts(res)
+                        for mouflon, part in mouflon_and_parts:
+                            real_part_url = decode(mouflon,decrypt_key)
+                            real_part_url = f"{part.rsplit('/',1)[0]}/{real_part_url}"
+                            if real_part_url not in self.part_to_down:
+                                self.part_to_down.append(real_part_url)
+                                self.part_index +=1
+                                t = threading.Thread(target=down_part_url_by_thread,args=(self,real_part_url,self.part_index))
+                                t.start()  
+                return m3u8_obj
+            except Exception as e:
+                if "Illegal request-target" in str(res):
+                    await asyncio.sleep(1)
+                    continue
+                logger.error(f"({self.model_name}) get m3u8 file error -> {e} result {res}",exc_info=True)
+                self.stop_flag= True
+                return self
     async def download_part_file(self,sequence,part_uri_list):
         try:
             logger.debug(f"begin down part uri list -> {part_uri_list} , sequence -> {sequence}")
@@ -272,7 +289,7 @@ class TaskMixin:
                 for key in oldest_keys:
                     del self.part_down_finish[key]
             
-    async def _start_downloader(self):
+    async def down_init_file(self):
         try:
             if not os.path.exists(self.save_dir):
                 os.makedirs(self.save_dir)
@@ -294,66 +311,34 @@ class TaskMixin:
             self.stop_flag = True
             return
         
-        while not self.stop_flag:
-            if len(self.part_to_down) == 0:
-                logger.debug(f"({self.model_name}) No part to download")
-                await asyncio.sleep(0)
-            else:
-                min_sequence = min(self.part_to_down.keys())
-                max_sequence = max(self.part_to_down.keys())
-                ## 下载从 min_sequence 到 max_sequence -1 的part
-                for sequence in range(min_sequence, max_sequence):
-                    if sequence in self.part_to_down.keys():
-                        part_uri_list = self.part_to_down.pop(sequence)
-                        loop=asyncio.get_event_loop()
-                        # loop.create_task(self.download_part_file(sequence,part_uri_list))
-                        await self.download_part_file(sequence,part_uri_list)
-                        await asyncio.sleep(0)
-
     async def _start_writer(self):
-        start_sequence = self.current_segment_sequence
+        part_write_index = 1
         while not self.stop_flag:
-            if start_sequence in self.data_map.keys():
+            if len(self.part_down_finish.keys())>0:
                 if not self.current_save_path:
-                    logger.debug(f"({self.model_name}) Save path is not set, wait... -> {start_sequence}")
+                    logger.debug(f"({self.model_name}) Save path is not set, wait...")
                     await asyncio.sleep(5)
                     continue
+                while True:
+                    data = self.part_down_finish.get(part_write_index,None)
+                    if data is None:
+                        logger.debug(f"({self.model_name}) can not find index -> {part_write_index} in part_down_finish dict,retry in 5s")
+                        await asyncio.sleep(5)
+                        continue
+                    break
+                if data == b"":
+                    continue
                 async with aiofiles.open(self.current_save_path, 'ab') as afp:
-                    for data in self.data_map[start_sequence]:
-                        await afp.write(data)
-                logger.info(f"({self.model_name}) Write sequence {start_sequence} to file success")
-                _  = self.data_map.pop(start_sequence)
+                    # for data in self.data_map[start_sequence]:
+                    await afp.write(data)
+                logger.info(f"({self.model_name}) Write sequence  to file success,index -> {part_write_index}")
+                _  = self.part_down_finish.pop(part_write_index)
                 del _
-                start_sequence += 1
+                part_write_index += 1
             else:
                 await asyncio.sleep(5)
-                logger.debug(f"({self.model_name}) wait 5s to get data...,current sequence -> {start_sequence}")
-                # wait 10s ,if still not get the data, ignore this sequence
-                if start_sequence in self.data_map.keys():
-                    continue
-                else:
-                    start_sequence += 1
-                    ## delete ignore data
-                    for key in list(self.data_map.keys()):
-                        if key < start_sequence:
-                            logger.debug(f"({self.model_name}) Delete ignore data -> {key}")
-                            _ = self.data_map.pop(key)
-                            del _
-                    if len(self.data_map.keys()) > 15:
-                        start_sequence = min(self.data_map.keys())
-        # write all rest data
-        if self.data_map.keys():
-            logger.debug(f"({self.model_name}) Write rest data to {self.current_save_path}...keys:{self.data_map.keys()}")
-            start = min(self.data_map.keys())
-            while self.data_map.keys():
-                if start in self.data_map.keys():
-                    async with aiofiles.open(self.current_save_path, 'ab') as afp:
-                        for data in self.data_map[start]:
-                            await afp.write(data)
-                    logger.info(f"({self.model_name}) Write sequence {start} to file success")
-                    _  = self.data_map.pop(start)
-                    del _
-                start += 1
+                logger.debug(f"({self.model_name}) wait 5s to get data...,current index -> {part_write_index}")
+
 
     def _get_sequence(self,partUri:str):
         # get sequence from partUri
@@ -386,7 +371,6 @@ class Task(TaskMixin):
         self.part_to_down.clear()
         self.part_down_finish.clear()
         self.data_map.clear()
-        self.temp_data_map.clear()
 
     async def start(self):
         m3u8_uri,stream_name = await self.is_online(self.model_name)
@@ -403,7 +387,7 @@ class Task(TaskMixin):
             return self
 
         loop = asyncio.get_event_loop()
-        loop.create_task(self._start_downloader()).add_done_callback(self._on_downloader_done)
+        loop.create_task(self.down_init_file()).add_done_callback(self._on_downloader_done)
         loop.create_task(self._start_writer()).add_done_callback(self._on_writer_done)
 
         while not self.stop_flag:

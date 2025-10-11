@@ -51,8 +51,16 @@ func getDecryptKey(pkey string) (string, error) {
 		return "", fmt.Errorf("failed to create request: %v", err)
 	}
 
-	// 设置User-Agent头
-	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/58.0.3029.110 Safari/537.3")
+	// 设置更完整的浏览器请求头
+	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36")
+	// req.Header.Set("Accept", "application/json, text/plain, */*")
+	// req.Header.Set("Accept-Language", "en-US,en;q=0.9")
+	// req.Header.Set("Accept-Encoding", "gzip, deflate, br")
+	// req.Header.Set("Connection", "keep-alive")
+	// req.Header.Set("Referer", "https://stripchat.com/")
+	// req.Header.Set("Sec-Fetch-Dest", "empty")
+	// req.Header.Set("Sec-Fetch-Mode", "cors")
+	// req.Header.Set("Sec-Fetch-Site", "same-site")
 
 	// 发送请求
 	resp, err := client.Do(req)
@@ -117,7 +125,15 @@ func getDecryptKey(pkey string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("failed to create main.js request: %v", err)
 	}
-	mainJSReq.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/58.0.3029.110 Safari/537.3")
+	mainJSReq.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36")
+	// mainJSReq.Header.Set("Accept", "*/*")
+	// mainJSReq.Header.Set("Accept-Language", "en-US,en;q=0.9")
+	// mainJSReq.Header.Set("Accept-Encoding", "gzip, deflate, br")
+	// mainJSReq.Header.Set("Connection", "keep-alive")
+	// mainJSReq.Header.Set("Referer", "https://stripchat.com/")
+	// mainJSReq.Header.Set("Sec-Fetch-Dest", "script")
+	// mainJSReq.Header.Set("Sec-Fetch-Mode", "no-cors")
+	// mainJSReq.Header.Set("Sec-Fetch-Site", "same-site")
 
 	mainJSResp, err := client.Do(mainJSReq)
 	if err != nil {
@@ -146,7 +162,15 @@ func getDecryptKey(pkey string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("failed to create doppio.js request: %v", err)
 	}
-	doppioJSReq.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/58.0.3029.110 Safari/537.3")
+	doppioJSReq.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36")
+	// doppioJSReq.Header.Set("Accept", "*/*")
+	// doppioJSReq.Header.Set("Accept-Language", "en-US,en;q=0.9")
+	// doppioJSReq.Header.Set("Accept-Encoding", "gzip, deflate, br")
+	// doppioJSReq.Header.Set("Connection", "keep-alive")
+	// doppioJSReq.Header.Set("Referer", "https://stripchat.com/")
+	// doppioJSReq.Header.Set("Sec-Fetch-Dest", "script")
+	// doppioJSReq.Header.Set("Sec-Fetch-Mode", "no-cors")
+	// doppioJSReq.Header.Set("Sec-Fetch-Site", "same-site")
 
 	doppioJSResp, err := client.Do(doppioJSReq)
 	if err != nil {
@@ -413,8 +437,8 @@ type Task struct {
 	StreamName             string
 	OnlineM3u8File         string
 	ExtXMap                string
-	PartToDownload         TDataMap
-	PartDownFinished       TDataMap
+	PartIndex              int
+	PartToDownload         []string
 	TaskMap                map[string]*Task
 	CurrentSaveFilePath    string // current save file path
 	NotifyMessageChan      chan<- NotifyMessage
@@ -438,8 +462,7 @@ func NewTask(config Config, modelName string, taskMap map[string]*Task, notifyMe
 		StreamName:             "",
 		OnlineM3u8File:         "",
 		ExtXMap:                "",
-		PartToDownload:         TDataMap{},
-		PartDownFinished:       TDataMap{},
+		PartToDownload:         []string{},
 		TaskMap:                taskMap,
 		CurrentSaveFilePath:    "",
 		NotifyMessageChan:      notifyMessageChan,
@@ -450,6 +473,7 @@ func NewTask(config Config, modelName string, taskMap map[string]*Task, notifyMe
 		DecodeKeyPairs:         make(map[string]string), // 初始化解密密钥映射
 		Pkey:                   "",                      // 初始化Pkey
 		mediaUri:               "",
+		PartIndex:              1,
 	}
 }
 
@@ -459,12 +483,12 @@ func (t *Task) init() {
 	t.StreamName = ""
 	t.OnlineM3u8File = ""
 	t.ExtXMap = ""
-	t.PartToDownload = TDataMap{}
-	t.PartDownFinished = TDataMap{}
+	t.PartToDownload = []string{}
 	t.CurrentSaveFilePath = ""
 	t.IsDownloaderStart = false
 	t.IsFileWriterStart = false
 	t.SaveDir = ""
+	t.PartIndex = 1
 }
 
 func (t *Task) IsOnline() (bool, string) {
@@ -474,19 +498,34 @@ func (t *Task) IsOnline() (bool, string) {
 	}
 
 	CamInfoUri := fmt.Sprintf("https://stripchat.com/api/front/v2/models/username/%s/cam", t.ModelName)
-	resp, err := http.Get(CamInfoUri)
+
+	// 创建自定义HTTP客户端
+	client := &http.Client{}
+
+	// 创建请求并添加浏览器头部信息
+	req, err := http.NewRequest("GET", CamInfoUri, nil)
+	if err != nil {
+		log.Printf("(%s) Failed to create request: %s", t.ModelName, err)
+		return false, ""
+	}
+
+	// 添加更完整的浏览器请求头
+	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36")
+
+	resp, err := client.Do(req)
 	if err != nil {
 		log.Printf("(%s) Get cam info failed, error: %s", t.ModelName, err)
 		return false, ""
 	}
-
 	defer resp.Body.Close()
 	if resp.StatusCode != 200 {
-		log.Printf("(%s) Get cam info failed,status code:%v, error: %s", t.ModelName, resp.StatusCode, err)
+		log.Printf("(%s) Get cam info failed,status code: %v, error: %s", t.ModelName, resp.StatusCode, err)
 		return false, ""
 	}
 
 	body, err := ioutil.ReadAll(resp.Body)
+	// fmt.Println(">>>>>>>>>>>>>>>>>>>>>>>>", string(body))
+	// return false, ""
 	if err != nil {
 		log.Printf("(%s) Read cam info failed, error: %s", t.ModelName, err)
 		return false, ""
@@ -509,6 +548,7 @@ func (t *Task) IsOnline() (bool, string) {
 	// 参考 Python 版本，使用新的 m3u8 URL 格式
 	// online_mu3u8_uri = f'https://edge-hls.doppiocdn.com//hls/{resp["cam"]["streamName"]}/master/{resp["cam"]["streamName"]}_auto.m3u8'
 	m3u8File := fmt.Sprintf("https://edge-hls.doppiocdn.com//hls/%s/master/%s_auto.m3u8", camInfo.Cam.StreamName, camInfo.Cam.StreamName)
+	// fmt.Println(">>>>>>>>>>>>>>>>", m3u8File)
 	log.Printf("(%s) is online, m3u8 file: %s", t.ModelName, m3u8File)
 
 	t.OnlineM3u8File = m3u8File
@@ -541,7 +581,9 @@ func (t *Task) getMediaUri() string {
 	if err != nil {
 		fmt.Errorf("failed to create request: %v", err)
 	}
-	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/58.0.3029.110 Safari/537.3")
+
+	// 添加更完整的浏览器请求头
+	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36")
 
 	// log.Printf("(%s) get m3u8 file -> %s", t.ModelName, t.OnlineM3u8File)
 	resp, err := client.Do(req)
@@ -608,6 +650,41 @@ func (t *Task) getMediaUri() string {
 	return mediaUriWithParams
 }
 
+func (t *Task) DownloadByThread(url string, index int) {
+	// 创建HTTP客户端
+	client := &http.Client{}
+	indexStr := strconv.Itoa(index)
+	// 创建请求并添加浏览器头部信息
+	req, err := http.NewRequest("GET", url, nil)
+	if err != nil {
+		log.Printf("(%s) Failed to create request for %s: %v", t.ModelName, url, err)
+		return
+	}
+
+	// 添加浏览器请求头，模拟真实浏览器请求
+	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36")
+
+	resp, err := client.Do(req)
+
+	if resp.StatusCode != http.StatusOK || err != nil {
+		// log.Printf("(%s) Download file failed, status code: %d. url: %s", t.ModelName, resp.StatusCode, url)
+		log.Printf("(%s) Download file failed, status code: %d. index: %s err:%s", t.ModelName, resp.StatusCode, indexStr, err)
+		t.DataMap.Store(indexStr, nil)
+		return
+	}
+	defer resp.Body.Close()
+
+	// 读取响应内容
+	data, err := ioutil.ReadAll(resp.Body)
+	if err != nil {
+		log.Printf("(%s) Read response body failed, error: %v. index: %s ", t.ModelName, err, indexStr)
+		t.DataMap.Store(indexStr, nil)
+		return
+	}
+	log.Printf("(%s) Download file success, index: %s url: %s", t.ModelName, indexStr, url)
+	t.DataMap.Store(indexStr, data)
+}
+
 func (t *Task) GetPlayList() error {
 
 	// 创建HTTP客户端
@@ -617,7 +694,9 @@ func (t *Task) GetPlayList() error {
 	if err != nil {
 		return fmt.Errorf("failed to create media request: %v", err)
 	}
-	mediaReq.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/58.0.3029.110 Safari/537.3")
+
+	// 添加更完整的浏览器请求头
+	mediaReq.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36")
 
 	mediaResp, err := client.Do(mediaReq)
 	if err != nil {
@@ -654,9 +733,7 @@ func (t *Task) GetPlayList() error {
 		t.ExtXMap = mediaPlaylist.Segments[0].Map.URI
 	}
 	// 提取和处理mouflon和parts
-	// fmt.Println("><<<<<", mediaM3u8Content)
 	mouflonAndParts := extractMouflonAndParts(mediaM3u8Content)
-	// log.Printf("(%s) mouflonAndParts: %v", t.ModelName, mouflonAndParts)
 	for _, mouflonPart := range mouflonAndParts {
 		if len(mouflonPart) < 2 {
 			continue
@@ -675,36 +752,15 @@ func (t *Task) GetPlayList() error {
 		partDir := part[:strings.LastIndex(part, "/")]
 		fullRealPartUrl := fmt.Sprintf("%s/%s", partDir, realPartUrl)
 
-		// 获取序列号
-		sequence := t._getSequence(fullRealPartUrl)
-		if sequence == "" {
-			log.Printf("(%s) get sequence from URL failed: %s", t.ModelName, fullRealPartUrl)
+		// 判断是否已经春在t.PartToDownload中
+		if Contains(t.PartToDownload, fullRealPartUrl) {
 			continue
 		}
 
-		// 判断PartToDownload是否存在sequence，不存在就添加列表
-		_, inDownload := t.PartToDownload.Load(sequence)
-		if !inDownload {
-			// 如果同时存在，则跳过
-			t.PartToDownload.Store(sequence, []string{})
+		go t.DownloadByThread(fullRealPartUrl, t.PartIndex)
+		t.PartIndex++
+		time.Sleep(500 * time.Millisecond)
 
-		}
-
-		// 判断是否存在列表中,不存才添加
-		exist := false
-		val, _ := t.PartToDownload.Load(sequence)
-		urls, _ := val.([]string)
-		for _, url := range urls {
-			if url == fullRealPartUrl {
-				exist = true
-				break
-			}
-		}
-		if !exist {
-			urls = append(urls, fullRealPartUrl)
-			t.PartToDownload.Store(sequence, urls)
-			log.Printf("(%s) add part url -> %s to sequence -> %s", t.ModelName, fullRealPartUrl, sequence)
-		}
 	}
 	return nil
 }
@@ -713,11 +769,14 @@ func (t *Task) FileWriter(ctx context.Context) {
 	log.Printf("(%s) task file writer start ...  %s ", t.ModelName, t.CurrentSaveFilePath)
 	t.IsFileWriterStart = true
 	// wait until t.DataMap is not empty and t.CurrentSegmentSequence is not -1
+
 WAIT:
-	if t.CurrentSegmentSequence == -1 {
+	if t.ExtXMap == "" {
 		time.Sleep(1 * time.Second)
 		goto WAIT
 	}
+
+	t.DownloadInitFile(ctx)
 
 	file, err := os.OpenFile(t.CurrentSaveFilePath, os.O_WRONLY|os.O_APPEND|os.O_CREATE, 0666)
 	if err != nil {
@@ -726,7 +785,7 @@ WAIT:
 	}
 	defer file.Close()
 
-	// startIndex := t.CurrentSegmentSequence
+	currentIndex := 1
 	for {
 		select {
 		case <-ctx.Done():
@@ -737,82 +796,38 @@ WAIT:
 			for i := minKey; i <= maxKey; i++ {
 				// get data from map by sequence,start from t.CurrentSegmentSequence,if not exist,wait 2min max,else continue
 				key := fmt.Sprintf("%d", i)
-				if dataList, ok := t.DataMap.Load(key); ok {
-					dataList, _ := dataList.([][]byte)
-					for _, data := range dataList {
-						file.Write(data)
-					}
-					log.Printf("(%s) write data to file %s, sequence -> %s", t.ModelName, t.CurrentSaveFilePath, key)
+				if data, ok := t.DataMap.Load(key); ok {
+					data, _ := data.([]byte)
+					file.Write(data)
 					t.DataMap.Delete(key)
 				}
+				log.Printf("(%s) write data to file %s, indexStr -> %d", t.ModelName, t.CurrentSaveFilePath, i)
 				// file.Close()
 			}
 			t.IsFileWriterStart = false
 			return
 		default:
-			minKey := t.DataMap.GetMinKey()
-			maxKey := t.DataMap.GetMaxKey()
-			// fmt.Println("minKey ->", minKey, "maxKey ->", maxKey, t.DataMap.Length())
-			for i := minKey; i <= maxKey; i++ {
-				// get data from map by sequence,start from t.CurrentSegmentSequence,if not exist,wait 2min max,else continue
-				key := fmt.Sprintf("%d", i)
-				if dataList, ok := t.DataMap.Load(key); ok {
-					dataList, _ := dataList.([][]byte)
-					for _, data := range dataList {
-						file.Write(data)
-					}
-					log.Printf("(%s) write data to file %s, sequence -> %s", t.ModelName, t.CurrentSaveFilePath, key)
-					t.DataMap.Delete(key)
-				}
-				// file.Close()
-			}
-			t.IsFileWriterStart = true
-			// time.Sleep(1 * time.Second)
-		}
-	}
-
-}
-
-func (t *Task) DownloadPartFile(PartUrl []string, ExtXMap string, Sequence string) bool {
-	defer func() {
-		if err := recover(); err != nil {
-			log.Printf("(%s) Download part file failed, error: %s. uri %s", t.ModelName, err, PartUrl)
-			return
-		}
-	}()
-	// 1. down part file
-	log.Printf("(%s) Download part file list, sequence -> %s, uri count: %d", t.ModelName, Sequence, len(PartUrl))
-	for _, url := range PartUrl {
-		resp, err := http.Get(url)
-		if err != nil {
-			log.Printf("(%s) Download part file failed, error: %s. uri %s", t.ModelName, err, url)
-			return false
-		} else {
-			defer resp.Body.Close()
-			data, _ := ioutil.ReadAll(resp.Body)
-			if resp.StatusCode != 200 {
-				log.Printf("(%s) Download part file failed, error: %s. uri %s statusCode:%v \n response %s", t.ModelName, err, url, resp.StatusCode, data)
-				return false
-			} else {
-				// 检查DataMap中是否已存在该Sequence
-				if dataList, ok := t.DataMap.Load(Sequence); ok {
-					// 将 data 添加到 dataList 中
-					dataList = append(dataList.([][]byte), data)
-					t.DataMap.Store(Sequence, dataList)
+			if t.DataMap.Length() > 0 {
+				data, exist := t.DataMap.Load(fmt.Sprintf("%d", currentIndex))
+				if !exist {
+					time.Sleep(1 * time.Second)
+					continue
 				} else {
-					// 第一次存储该序列号
-					t.DataMap.Store(Sequence, [][]byte{data})
+					data, _ := data.([]byte)
+					file.Write(data)
+					t.DataMap.Delete(fmt.Sprintf("%d", currentIndex))
+					log.Printf("(%s) write data to file %s, indexStr -> %s", t.ModelName, t.CurrentSaveFilePath, fmt.Sprintf("%d", currentIndex))
+					currentIndex++
 				}
-				// log.Printf("(%s) Download part file success, uri %s,sequence -> %s ", t.ModelName, url, Sequence)
+			} else {
+				time.Sleep(1 * time.Second)
 			}
-
 		}
 	}
-	log.Printf("(%s) Download part file list success, uri %s,sequence -> %s", t.ModelName, PartUrl, Sequence)
-	return true
+
 }
 
-func (t *Task) Downloader(ctx context.Context) {
+func (t *Task) DownloadInitFile(ctx context.Context) {
 	defer func() {
 		log.Printf("(%s) task downloader stop feed path -> %s ", t.ModelName, t.CurrentSaveFilePath)
 		t.IsDownloaderStart = false
@@ -852,7 +867,21 @@ func (t *Task) Downloader(ctx context.Context) {
 
 	// download init file first
 	log.Printf("(%s) is Online . start task,begin downloading init file", t.ModelName)
-	resp, err := http.Get(t.ExtXMap)
+
+	// 创建HTTP客户端
+	client := &http.Client{}
+
+	// 创建请求并添加浏览器头部信息
+	initReq, err := http.NewRequest("GET", t.ExtXMap, nil)
+	if err != nil {
+		log.Printf("(%s) Failed to create request for init file: %s", t.ModelName, err)
+		return
+	}
+
+	// 添加更完整的浏览器请求头
+	initReq.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36")
+
+	resp, err := client.Do(initReq)
 
 	if err != nil {
 		log.Printf("(%s) Download init file failed, error: %s. uri %s", t.ModelName, err, t.ExtXMap)
@@ -864,33 +893,6 @@ func (t *Task) Downloader(ctx context.Context) {
 	file, _ := os.OpenFile(t.CurrentSaveFilePath, os.O_WRONLY|os.O_APPEND|os.O_CREATE, 0666)
 	file.Write(data)
 	file.Close() // loop , don't user defer
-
-	for {
-		select {
-		case <-ctx.Done():
-			log.Printf("(%s) task stop download ... maybe model is offline", t.ModelName)
-			t.NotifyMessageChan <- NotifyMessage{
-				ModelName: t.ModelName,
-				Message:   "model live stream down finish",
-				SavePath:  t.CurrentSaveFilePath,
-				Type:      "down_finish",
-			}
-			return
-		default:
-			t.ListOpLock.Lock()
-			minKey := t.PartToDownload.GetMinKey()
-			maxKey := t.PartToDownload.GetMaxKey()
-			for i := minKey; i < maxKey; i++ {
-				sequence := fmt.Sprintf("%d", i)
-				if partUriList, exists := t.PartToDownload.Load(sequence); exists {
-					t.DownloadPartFile(partUriList.([]string), t.ExtXMap, sequence)
-					//从PartToDownload中删除该sequence
-					t.PartToDownload.Delete(sequence)
-				}
-			}
-			t.ListOpLock.Unlock()
-		}
-	}
 
 }
 
@@ -913,9 +915,9 @@ func (t *Task) Run() {
 			delete(t.TaskMap, t.ModelName)
 			return
 		}
-		if !t.IsDownloaderStart {
-			go t.Downloader(ctx)
-		}
+		// if !t.IsDownloaderStart {
+		// 	go t.Downloader(ctx)
+		// }
 	}
 	// }
 
